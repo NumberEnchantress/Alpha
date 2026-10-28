@@ -89,7 +89,10 @@
       if (schemeIds[s.id]) errors.push(where + ': duplicate scheme id');
       schemeIds[s.id] = 1;
       var colours = {};
-      (s.colours || []).forEach(function (c) { colours[c.id] = 1; });
+      (s.colours || []).forEach(function (c) {
+        colours[c.id] = 1;
+        if (!/^#[0-9a-f]{6}$/i.test(c.hex || '')) errors.push(where + ': colour ' + c.id + ' needs a hex like #1f5fd1');
+      });
       var labels = {};
       (s.groups || []).forEach(function (g) {
         if (labels[g.label]) errors.push(where + ': duplicate group label ' + g.label);

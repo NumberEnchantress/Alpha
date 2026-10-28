@@ -72,8 +72,7 @@
     var st = '';
     if (r.mode === 'empty') st = '';
     else if (!r.total) {
-      var n = Alpha.ndc.normalize(q);
-      st = r.mode === 'ndc' && n ? 'No product with NDC ' + Alpha.ndc.format(n) + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
+      st = r.complete ? 'No product with NDC ' + r.complete + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
     } else {
       st = r.total + (r.total === 1 ? ' match' : ' matches') + (r.total > 3 ? ', most used first' : '') +
         (r.total > MAX_SHOWN ? ' (showing ' + MAX_SHOWN + '; type more to narrow)' : '') + '.';
@@ -156,18 +155,22 @@
     if (e.key === ',') { e.preventDefault(); Alpha.settings.open(); return; }
     if (e.key === 'Escape') { var q = $('q'); q.value = ''; runSearch(); q.focus(); return; }
     // Any printable key goes to the search box (so a barcode scan always lands there).
-    if (e.key.length === 1 && e.key !== ' ') { $('q').focus(); }
+    // The old text is selected, so what is typed replaces it.
+    if (e.key.length === 1 && e.key !== ' ') { var q = $('q'); q.focus(); q.select(); }
   }
 
-  // The first layout of a chosen product costs ~65 ms at 4x throttle (fonts,
-  // first layout of the panes). Pay it once while idle after load, invisibly:
-  // lay out one product, then put the empty state back in the same task.
+  // The first search after load costs ~50-65 ms at 4x throttle (fonts, first
+  // layout of the results list and panes). Pay it once while idle after load,
+  // invisibly: run one search, lay it out, and put the empty state back, all
+  // in one task so nothing is painted.
   function warmUp() {
-    if (!S.product && !$('q').value && S.ds.products.length) {
-      choose(S.ds.products[0]);
+    var q = $('q');
+    if (!S.product && !q.value && S.ds.products.length) {
+      q.value = 'a';
+      runSearch();
       void document.body.offsetHeight;
-      S.index.search('a 1');
-      choose(null);
+      q.value = '';
+      runSearch();
     }
     Alpha.warmed = true;
   }

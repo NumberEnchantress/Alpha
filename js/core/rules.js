@@ -120,7 +120,7 @@
         if (q === p || q.ndc === p.ndc) continue;
         if (!e.match.every(function (f) { return !isUnknown(get(p, f)) && same(get(p, f), get(q, f)); })) continue;
         if (e.where && !test(e.where, q, ctx)) continue;
-        if (!found || (q.rank || 999) < (found.rank || 999)) found = q;
+        if (!found || rankOf(q) < rankOf(found)) found = q;
       }
       if (found) ctx.equivalent = found;
       return !!found;
@@ -144,6 +144,8 @@
     }
     return false;
   }
+
+  function rankOf(p) { return p.rank != null ? p.rank : 999; }
 
   function fill(msg, p, eq) {
     return msg.replace(/\{\{\s*([\w.]+)\s*\}\}/g, function (m, path) {
