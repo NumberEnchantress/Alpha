@@ -22,8 +22,7 @@
     S.ds = chooseDataset();
     if (!S.ds) { $('status').textContent = 'No data found. Check that app/data/sample/pharmacy.js exists.'; return false; }
     S.issues = Alpha.check.checkDataset(S.ds);
-    var compiled = Alpha.rules.compile(S.ds.rules || []);
-    S.rules = compiled.rules;
+    compileRules();
     S.index = Alpha.search.createIndex(S.ds.products || []);
     $('dataset-name').textContent = S.ds.meta.name;
     $('sample-banner').hidden = !S.ds.meta.sample;
@@ -31,6 +30,13 @@
     Alpha.info.renderBaskets($('baskets'), Alpha.settings.scheme(S.ds));
     if (S.issues.errors.length && window.console) console.warn('Alpha data problems:', S.issues.errors);
     return true;
+  }
+
+  // Rules from the data file plus any added in Settings.
+  function compileRules() {
+    var c = Alpha.rules.compile((S.ds.rules || []).concat(Alpha.settings.customRules()), Alpha.rules.PRODUCT_FIELDS);
+    S.rules = c.rules;
+    S.ruleErrors = c.errors;
   }
 
   /* ---------- search and results ---------- */
@@ -117,6 +123,7 @@
   }
 
   function refresh() {
+    compileRules();
     Alpha.info.renderBaskets($('baskets'), Alpha.settings.scheme(S.ds));
     choose(S.product);
   }
@@ -146,6 +153,7 @@
     var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable);
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === '?') { e.preventDefault(); $('help').showModal(); return; }
+    if (e.key === ',') { e.preventDefault(); Alpha.settings.open(); return; }
     if (e.key === 'Escape') { var q = $('q'); q.value = ''; runSearch(); q.focus(); return; }
     // Any printable key goes to the search box (so a barcode scan always lands there).
     if (e.key.length === 1 && e.key !== ' ') { $('q').focus(); }
