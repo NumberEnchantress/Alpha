@@ -1,10 +1,170 @@
-/* Settings. Minimal until Phase 5: first basket scheme, all rules on. */
+/* Settings: basket scheme, text size, which rules are on, and rules the
+   user adds here. Saved in localStorage when the browser allows it;
+   otherwise they last until the page is closed. */
 (function (Alpha) {
   'use strict';
+  var ui = Alpha.ui, esc = ui.esc, store = ui.store;
+  var OP_LABELS = {
+    eq: 'is', ne: 'is not', in: 'is one of', notIn: 'is none of', between: 'is between', lt: 'is less than',
+    lte: 'is at most', gt: 'is more than', gte: 'is at least', contains: 'contains', startsWith: 'starts with',
+    known: 'is known', unknown: 'is unknown'
+  };
+  var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
+
+  var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
+  var saved = true, hooks = {}, dlg = null;
+
+  function load() {
+    var p = store.get('prefs', null);
+    if (p && typeof p === 'object') {
+      prefs.scheme = p.scheme || null;
+      prefs.scale = p.scale || '1';
+      prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
+      prefs.custom = Array.isArray(p.custom) ? p.custom : [];
+    }
+  }
+  function save() { saved = store.set('prefs', prefs); }
+  saved = store.set('probe', 1); // false when the browser blocks storage
+  function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); }
+
+  function scheme(ds) {
+    var list = (ds && ds.basketSchemes) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === prefs.scheme) return list[i];
+    return list[0] || null;
+  }
+  function disabledRules() { return prefs.disabled; }
+  function customRules() { return prefs.custom; }
+
+  /* ---------- the dialog ---------- */
+  // Plain-English version of any rule condition.
+  function describe(c) {
+    if (!c || typeof c !== 'object') return '?';
+    if (c.all) return c.all.map(describe).join(', and ');
+    if (c.any) return '(' + c.any.map(describe).join(', or ') + ')';
+    if (c.not) return 'not (' + describe(c.not) + ')';
+    if (c.equivalent) {
+      return 'another NDC with the same ' + (c.equivalent.match || []).join(', ') +
+        (c.equivalent.where ? ' has ' + describe(c.equivalent.where) : ' exists');
+    }
+    var v = Array.isArray(c.value) ? (c.op === 'between' ? c.value.join(' and ') : c.value.join(', ')) : c.value;
+    return c.field + ' ' + (OP_LABELS[c.op] || c.op) + (v !== undefined ? ' ' + v : '');
+  }
+  function ruleText(r) { return 'When ' + describe(r.when); }
+  // Message as written, with placeholders shown as [field].
+  function messageText(m) { return String(m).replace(/\{\{\s*([\w.]+)\s*\}\}/g, '[$1]'); }
+
+  function build() {
+    var ds = Alpha.state.ds, S = Alpha.state, cur = scheme(ds);
+    var h = '<h2 id="settings-title">Settings</h2>';
+    if (!saved) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
+
+    h += '<fieldset><legend>Basket colours</legend>' + (ds.basketSchemes || []).map(function (s) {
+      return '<label class="opt"><input type="radio" name="scheme" value="' + esc(s.id) + '"' + (cur && cur.id === s.id ? ' checked' : '') + '> ' +
+        esc(s.name) + ' <span class="muted">(' + s.groups.length + ' groups)</span></label>';
+    }).join('') + '<p class="muted small">Which group a script belongs to is not decided by Alpha yet (open question 1 in NOTES.md).</p></fieldset>';
+
+    h += '<fieldset><legend>Text size</legend>' + SCALES.map(function (s) {
+      return '<label class="opt inline"><input type="radio" name="scale" value="' + s[0] + '"' + (prefs.scale === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>';
+    }).join('') + '</fieldset>';
+
+    var all = (ds.rules || []).map(function (r) { return { r: r, custom: false }; })
+      .concat(prefs.custom.map(function (r) { return { r: r, custom: true }; }));
+    h += '<fieldset><legend>Warning rules</legend><ul class="rule-list">' + all.map(function (x) {
+      var r = x.r, on = !prefs.disabled[r.id];
+      return '<li><label class="opt"><input type="checkbox" data-rule="' + esc(r.id) + '"' + (on ? ' checked' : '') + '> ' +
+        '<span class="sevtag ' + esc(r.severity) + '">' + esc(r.severity) + '</span> ' + esc(messageText(r.message)) + '</label>' +
+        '<div class="muted small">' + esc(ruleText(r)) + (x.custom ? ' · added here' : ' · from the data file') + '</div>' +
+        (x.custom ? '<button type="button" class="btn small" data-del="' + esc(r.id) + '">Remove</button>' : '') + '</li>';
+    }).join('') + '</ul>';
+    if (S.ruleErrors && S.ruleErrors.length) {
+      h += '<p class="note-bad">Rules with errors were skipped:<br>' + S.ruleErrors.map(esc).join('<br>') + '</p>';
+    }
+    h += '<details class="add-rule"><summary>Add a rule</summary><div class="rule-form">' +
+      '<label>When <select id="nr-field">' + Alpha.rules.PRODUCT_FIELDS.map(function (f) { return '<option>' + f + '</option>'; }).join('') + '</select></label>' +
+      '<label><select id="nr-op">' + Object.keys(OP_LABELS).map(function (o) { return '<option value="' + o + '">' + OP_LABELS[o] + '</option>'; }).join('') + '</select></label>' +
+      '<label>Value <input id="nr-value" type="text" placeholder="e.g. 071, 078"></label>' +
+      '<label>Show <select id="nr-sev"><option value="warn">warning</option><option value="danger">danger</option><option value="info">note</option></select></label>' +
+      '<label class="wide">Message <input id="nr-msg" type="text" placeholder="e.g. Check the strength twice."></label>' +
+      '<p class="muted small wide">For "is between" give two values separated by a comma. For "is one of" give a list. Text and numbers both work; locations like 071 compare as numbers.</p>' +
+      '<button type="button" class="btn" id="nr-add">Add rule</button> <span id="nr-err" class="note-bad" role="alert"></span>' +
+      '</div></details></fieldset>';
+
+    var issues = S.issues || { errors: [], warnings: [] };
+    h += '<fieldset><legend>Data</legend><p>' + esc(ds.meta.name) + (ds.meta.sample ? ' <strong>(sample, fictional)</strong>' : '') + ': ' +
+      ds.products.length + ' products, ' + ds.layout.locations.length + ' locations.</p>' +
+      '<p>Data check: ' + issues.errors.length + ' errors, ' + issues.warnings.length + ' warnings.</p>' +
+      (issues.errors.length || issues.warnings.length ? '<details><summary>Show the list</summary><ul class="issue-list small">' +
+        issues.errors.map(function (e) { return '<li class="err">' + esc(e) + '</li>'; }).join('') +
+        issues.warnings.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>' : '') +
+      '<div id="import-area"></div></fieldset>';
+
+    h += '<form method="dialog" class="dialog-actions"><button class="btn">Close</button></form>';
+    dlg.innerHTML = h;
+    if (Alpha.importer) Alpha.importer.mount(document.getElementById('import-area'));
+  }
+
+  function parseValue(op, raw) {
+    if (op === 'known' || op === 'unknown') return undefined;
+    var parts = raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    var conv = function (s) { return s === 'true' ? true : s === 'false' ? false : s; };
+    if (op === 'between' || op === 'in' || op === 'notIn') return parts.map(conv);
+    return conv(raw.trim());
+  }
+
+  function addRule() {
+    var get = function (id) { return document.getElementById(id).value; };
+    var op = get('nr-op'), when = { field: get('nr-field'), op: op };
+    var v = parseValue(op, get('nr-value'));
+    if (v !== undefined) when.value = v;
+    var rule = { id: 'custom-' + Date.now().toString(36), severity: get('nr-sev'), message: get('nr-msg').trim(), when: when };
+    var res = Alpha.rules.compile([rule], Alpha.rules.PRODUCT_FIELDS);
+    var err = document.getElementById('nr-err');
+    if (!rule.message) { err.textContent = 'Write a message to show.'; return; }
+    if (res.errors.length) { err.textContent = res.errors.join('; ').replace(/rules\[0\] \([^)]*\)\.?/g, ''); return; }
+    prefs.custom.push(rule);
+    save(); changed();
+    build();
+  }
+
+  function changed() { applyScale(); if (hooks.onChange) hooks.onChange(); }
+
+  function onDialogEvent(e) {
+    var t = e.target;
+    if (t.name === 'scheme') { prefs.scheme = t.value; save(); changed(); }
+    else if (t.name === 'scale') { prefs.scale = t.value; save(); changed(); }
+    else if (t.hasAttribute && t.hasAttribute('data-rule')) {
+      var id = t.getAttribute('data-rule');
+      if (t.checked) delete prefs.disabled[id]; else prefs.disabled[id] = true;
+      save(); changed();
+    }
+  }
+  function onDialogClick(e) {
+    var del = e.target.closest('[data-del]');
+    if (del) {
+      var id = del.getAttribute('data-del');
+      prefs.custom = prefs.custom.filter(function (r) { return r.id !== id; });
+      delete prefs.disabled[id];
+      save(); changed(); build();
+      var first = dlg.querySelector('input'); if (first) first.focus();
+    } else if (e.target.id === 'nr-add') addRule();
+  }
+
+  function open() { build(); dlg.showModal(); var c = dlg.querySelector('input:checked') || dlg.querySelector('input'); if (c) c.focus(); }
+
+  function init(h) {
+    hooks = h || {};
+    dlg = document.getElementById('settings');
+    dlg.addEventListener('change', onDialogEvent);
+    dlg.addEventListener('click', onDialogClick);
+    dlg.addEventListener('close', function () { document.getElementById('q').focus(); });
+    document.getElementById('settings-btn').addEventListener('click', open);
+  }
+
+  load();
+  applyScale();
   Alpha.settings = {
-    init: function () {},
-    scheme: function (ds) { return (ds.basketSchemes || [])[0] || null; },
-    disabledRules: function () { return {}; },
-    importedDataset: function () { return null; }
+    init: init, open: open, scheme: scheme, disabledRules: disabledRules, customRules: customRules,
+    importedDataset: function () { return Alpha.importer ? Alpha.importer.dataset() : null; },
+    reload: function () { if (hooks.reload) hooks.reload(); }
   };
 })(window.Alpha);
