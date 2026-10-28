@@ -15,7 +15,10 @@
 
   // Numbers (with decimals) and words are separate tokens: "40mg" -> 40, mg.
   var TOKEN = /\d+(?:\.\d+)?|[a-z]+/g;
-  function tokenize(s) { return String(s || '').toLowerCase().match(TOKEN) || []; }
+  function tokenize(s) {
+    // ".5" means 0.5
+    return String(s || '').toLowerCase().replace(/(^|[^\d])\.(\d)/g, function (m, a, b) { return a + '0.' + b; }).match(TOKEN) || [];
+  }
 
   // Edit distance, used only to order typo matches (closest first).
   function distance(a, b) {
@@ -38,7 +41,7 @@
   // Results sort by tier, then rank, strength, drug, NDC. The last four are
   // fixed per product, so they are folded into one precomputed order number.
   function productOrder(products) {
-    var keyed = products.map(function (p) { return { p: p, r: p.rank || 999, s: strengthNumber(p) }; });
+    var keyed = products.map(function (p) { return { p: p, r: p.rank != null ? p.rank : 999, s: strengthNumber(p) }; });
     keyed.sort(function (a, b) {
       return (a.r - b.r) || (a.s - b.s) ||
         (a.p.drug < b.p.drug ? -1 : a.p.drug > b.p.drug ? 1 : 0) || (a.p.ndc < b.p.ndc ? -1 : 1);
@@ -100,17 +103,20 @@
       var d = ndc.digits(q), out = [], seen = Object.create(null);
       function add(p, tier) { if (p && !seen[p.ndc]) { seen[p.ndc] = 1; out.push({ product: p, tier: tier, o: order[p.ndc] }); } }
       var n11 = ndc.normalize(q);
-      if (n11) add(byNdc[n11], 0);
       var ten = ndc.fromUpc(d) || (d.length === 10 ? d : null);
-      if (ten) (byTen[ten] || []).forEach(function (p) { add(p, 0); });
-      if (!out.length || !n11) {
-        // Partial NDC: digits found anywhere in the 11-digit form.
-        for (var i = 0; i < products.length; i++) {
-          var p = products[i], at = p.ndc.indexOf(d);
-          if (at >= 0) add(p, at === 0 ? 1 : 2);
-        }
+      if (n11) add(byNdc[n11], 0);
+      else if (ten) (byTen[ten] || []).forEach(function (p) { add(p, 0); });
+      // A complete NDC or barcode that is not here must never fall back to a
+      // partial match: that would show a different product as if it were it.
+      if (n11 || ten || d.length >= 10) {
+        return { results: out, complete: n11 ? ndc.format(n11) : ndc.fromUpc(d) ? 'barcode ' + d : d };
       }
-      return out;
+      // Partial NDC: digits found anywhere in the 11-digit form.
+      for (var i = 0; i < products.length; i++) {
+        var p = products[i], at = p.ndc.indexOf(d);
+        if (at >= 0) add(p, at === 0 ? 1 : 2);
+      }
+      return { results: out, complete: null };
     }
 
     // Returns { mode: 'empty' | 'text' | 'ndc', results: [{ product, tier }], total }
@@ -119,10 +125,12 @@
       if (!q) return { mode: 'empty', results: [], total: 0 };
       var digitsOnly = !/[a-z]/i.test(q) && ndc.digits(q).length >= 5;
       var mode = digitsOnly ? 'ndc' : 'text';
-      var res = digitsOnly ? ndcSearch(q) : textSearch(q);
+      var nd = digitsOnly ? ndcSearch(q) : null;
+      var res = nd ? nd.results : textSearch(q);
       res.sort(function (a, b) { return (a.tier - b.tier) || (a.o - b.o); });
       var total = res.length;
-      return { mode: mode, results: limit ? res.slice(0, limit) : res, total: total };
+      // `complete`: the full NDC or barcode searched for, when the query was one.
+      return { mode: mode, results: limit ? res.slice(0, limit) : res, total: total, complete: nd ? nd.complete : null };
     }
 
     return { search: search, byNdc: byNdc };

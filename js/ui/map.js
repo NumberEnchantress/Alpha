@@ -2,25 +2,28 @@
    only moves classes and one marker, so it stays cheap on slow machines.
    Highlight: the location's units get a heavy outline; the chosen unit is
    filled. An estimated unit is hatched with a dashed outline and says
-   "est."; an unknown unit leaves every unit of the location outlined.
-   A marker shows where to stand (the side the unit is approached from). */
+   "EST." beside the marker; an unknown unit leaves every unit of the
+   location outlined. A marker shows where to stand (the side the unit is
+   approached from). Sizes scale with the floor (k), and strokes are in
+   screen pixels, so any layout size works. */
 (function (Alpha) {
   'use strict';
   var esc = Alpha.ui.esc;
-  var el = null, svg = null, layout = null, marker = null, title = null, lastHi = [];
+  var el = null, svg = null, layout = null, marker = null, markerEst = null, title = null, lastHi = [];
+  var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
 
   function unitLabel(loc, unit) {
     if (loc.units.length === 1) return loc.code;
-    return unit.label ? unit.label.replace(/ face$/, '') : unit.id;
+    return unit.label || unit.id;
   }
 
   // Labels in tall, narrow boxes run vertically.
   function vertical(r) { return r.h > r.w * 1.2; }
   function fontFor(r, text) {
     var w = vertical(r) ? r.h : r.w, h = vertical(r) ? r.w : r.h;
-    // Fit the label in the box, but never smaller than 1.6 floor units.
-    var byW = w / Math.max(2.2, text.length * 0.62), byH = h * 0.62;
-    return Math.max(1.6, Math.min(3.6, byW, byH));
+    // Fit the label in the box, but never smaller than 2 (scaled) floor units.
+    var byW = w / Math.max(2.2, text.length * 0.6), byH = h * 0.7;
+    return Math.max(2 * k, Math.min(3.6 * k, byW, byH));
   }
   function label(r, text) {
     var cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -32,9 +35,11 @@
     el = container; layout = lay;
     title = document.getElementById('map-title');
     var W = lay.width, D = lay.depth, parts = [];
-    parts.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 ' + (W + 2) + ' ' + (D + 2) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Floor map of ' + esc(lay.name) + '">');
-    parts.push('<defs><pattern id="hatch" width="1.6" height="1.6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
-      '<rect width="1.6" height="1.6" fill="#fff3a8"/><rect width="0.7" height="1.6" fill="#e0b400"/></pattern></defs>');
+    k = Math.max(W, D) / 100;
+    parts.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + (-k) + ' ' + (-k) + ' ' + (W + 2 * k) + ' ' + (D + 2 * k) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Floor map of ' + esc(lay.name) + '">');
+    var hw = 1.6 * k;
+    parts.push('<defs><pattern id="hatch" width="' + hw + '" height="' + hw + '" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+      '<rect width="' + hw + '" height="' + hw + '" fill="#fff3a8"/><rect width="' + hw * 0.45 + '" height="' + hw + '" fill="#e0b400"/></pattern></defs>');
     parts.push('<rect class="floor" x="0" y="0" width="' + W + '" height="' + D + '"/>');
     (lay.features || []).forEach(function (f) {
       var r = f.rect;
@@ -52,16 +57,20 @@
       });
     });
     // Where to stand: a disc with a pointer, placed by show().
-    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="2.1"/><text class="marker-text" y="0.1">YOU</text></g>');
+    // Drawn last, so nothing covers it. Its contents are in standard units and
+    // the group is scaled by k.
+    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="3"/><text class="marker-text" y="0.1" font-size="1.75">YOU</text>' +
+      '<g class="marker-est" visibility="hidden"><rect x="-3.6" y="3.4" width="7.2" height="2.9" rx="0.5"/><text y="4.85" font-size="2">EST.</text></g></g>');
     parts.push('</svg>');
     el.innerHTML = parts.join('');
     svg = el.firstChild;
-    marker = svg.getElementById ? svg.getElementById('map-marker') : el.querySelector('#map-marker');
+    marker = el.querySelector('#map-marker');
+    markerEst = marker.querySelector('.marker-est');
   }
 
   // A thick strip on the side the unit is approached from.
   function faceLine(u) {
-    var r = u.rect, t = 0.55, x = r.x, y = r.y, w = r.w, h = r.h;
+    var r = u.rect, t = 0.55 * k, x = r.x, y = r.y, w = r.w, h = r.h;
     if (u.face === 'N') h = t;
     else if (u.face === 'S') { y = r.y + r.h - t; h = t; }
     else if (u.face === 'W') w = t;
@@ -71,7 +80,7 @@
   }
 
   function standPoint(u) {
-    var r = u.rect, gap = 2.6;
+    var r = u.rect, gap = 3.6 * k;
     switch (u.face) {
       case 'N': return [r.x + r.w / 2, r.y - gap];
       case 'S': return [r.x + r.w / 2, r.y + r.h + gap];
@@ -83,9 +92,10 @@
 
   function show(loc) {
     if (!svg) return;
-    lastHi.forEach(function (g) { g.classList.remove('loc-hi', 'unit-hi', 'unit-est'); var t = g.querySelector('.est'); if (t) t.remove(); });
+    lastHi.forEach(function (g) { g.classList.remove('loc-hi', 'unit-hi', 'unit-est'); });
     lastHi = [];
     marker.setAttribute('visibility', 'hidden');
+    markerEst.setAttribute('visibility', 'hidden');
     if (!loc || !loc.location) {
       title.textContent = loc ? 'Floor map · location unknown' : 'Floor map';
       return;
@@ -98,12 +108,6 @@
       lastHi.push(g);
       if (loc.unit && g.getAttribute('data-unit') === loc.unit.id) {
         g.classList.add(loc.unitStatus === 'estimated' ? 'unit-est' : 'unit-hi');
-        if (loc.unitStatus === 'estimated') {
-          var r = loc.unit.rect, t = document.createElementNS(Alpha.ui.SVGNS, 'text');
-          t.setAttribute('class', 'est'); t.setAttribute('x', r.x + r.w / 2); t.setAttribute('y', r.y + r.h + 1.8);
-          t.setAttribute('font-size', '1.7'); t.textContent = 'est.';
-          g.appendChild(t);
-        }
       }
     }
     // Draw highlighted units last so their outlines sit on top.
@@ -113,9 +117,14 @@
       where += loc.unit ? ' · ' + (loc.unit.label || loc.unit.id) + (loc.unitStatus === 'estimated' ? ' (estimated)' : '') : ' · which unit: unknown';
     }
     title.textContent = 'Floor map · ' + where;
+    svg.setAttribute('aria-label', 'Floor map of ' + layout.name + '. Highlighted: ' + where);
     if (loc.unit) {
       var p = standPoint(loc.unit);
-      if (p) { marker.setAttribute('transform', 'translate(' + p[0] + ' ' + p[1] + ')'); marker.setAttribute('visibility', 'visible'); }
+      if (p) {
+        marker.setAttribute('transform', 'translate(' + p[0] + ' ' + p[1] + ') scale(' + k + ')');
+        marker.setAttribute('visibility', 'visible');
+        markerEst.setAttribute('visibility', loc.unitStatus === 'estimated' ? 'visible' : 'hidden');
+      }
     }
   }
 

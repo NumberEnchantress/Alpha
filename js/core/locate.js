@@ -57,7 +57,9 @@
      location: the layout location or null
      unit: the unit or null; unitStatus: known | estimated | unknown
      shelf: number or null; shelfStatus: known | estimated | unknown | none
-       (none = this unit has no shelves, e.g. the robot) */
+       (none = this unit has no shelves, e.g. the robot)
+     unitReason (when the unit is unknown): 'bad-id' if the data names a unit
+       that is not part of the location, 'no-range' otherwise. */
   function locate(product, layout) {
     var r = { location: null, unit: null, unitStatus: 'unknown', shelf: null, shelfStatus: 'unknown' };
     if (!product || !layout || product.location == null) return r;
@@ -70,8 +72,9 @@
 
     if (product.unit != null) {
       for (var j = 0; j < loc.units.length; j++) {
-        if (loc.units[j].id === product.unit) { r.unit = loc.units[j]; r.unitStatus = 'known'; }
+        if (loc.units[j].id === product.unit) { r.unit = loc.units[j]; r.unitStatus = 'known'; break; }
       }
+      if (!r.unit) r.unitReason = 'bad-id';
     } else if (loc.units.length === 1) {
       r.unit = loc.units[0]; r.unitStatus = 'known';
     } else {
@@ -79,11 +82,13 @@
         if (inRange(product.drug, loc.units[u].range)) { r.unit = loc.units[u]; r.unitStatus = 'estimated'; break; }
       }
     }
-    if (!r.unit) return r;
+    if (!r.unit) { r.unitReason = r.unitReason || 'no-range'; return r; }
 
     if (!r.unit.shelves) { r.shelfStatus = 'none'; return r; }
-    if (product.shelf != null && r.unitStatus === 'known') {
-      r.shelf = product.shelf; r.shelfStatus = 'known'; return r;
+    if (product.shelf != null && product.shelf >= 1 && product.shelf <= r.unit.shelves) {
+      // A shelf from the data is used as is; it is only "estimated" when the
+      // unit it belongs to was itself estimated.
+      r.shelf = product.shelf; r.shelfStatus = r.unitStatus === 'known' ? 'known' : 'estimated'; return r;
     }
     var est = estimateShelf(product.drug, r.unit);
     if (est != null) { r.shelf = est; r.shelfStatus = 'estimated'; }

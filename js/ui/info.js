@@ -17,7 +17,8 @@
     if (loc.shelfStatus === 'known') parts.push('shelf ' + loc.shelf + ' of ' + loc.unit.shelves);
     else if (loc.shelfStatus === 'estimated') { parts.push('shelf ≈' + loc.shelf + ' of ' + loc.unit.shelves + ' (estimated)'); estimated = true; }
     else if (loc.shelfStatus === 'unknown') parts.push('shelf unknown');
-    return { cls: estimated ? 'estimated' : '', text: parts.join(' — ') };
+    var unknown = !loc.unit || loc.shelfStatus === 'unknown';
+    return { cls: unknown ? 'unknown' : estimated ? 'estimated' : '', text: parts.join(' — ') };
   }
 
   function vials(v) {
@@ -33,7 +34,8 @@
     var items = scheme.groups.map(function (g) {
       var sw = g.baskets.map(function (b) {
         var c = colours[b] || { name: b, hex: '#ffffff' };
-        return '<span class="swatch" style="background:' + esc(c.hex) + '" aria-hidden="true"></span>';
+        var hex = /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff'; // only plain colours reach style=
+        return '<span class="swatch" style="background:' + hex + '" aria-hidden="true"></span>';
       }).join('');
       var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
       return '<li><strong>' + esc(g.label.replace(/^Group /, '')) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
@@ -62,15 +64,16 @@
       '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' +
       '<div class="i-loc ' + where.cls + '" data-testid="where">' + esc(where.text) + '</div>' +
       warningsHtml(warnings) +
+      // Two facts per row so the card fits at 1366x768.
       '<dl class="facts">' +
         '<dt>Form</dt><dd>' + show(p.form) + '</dd>' +
-        '<dt>Maker</dt><dd>' + show(p.manufacturer) + '</dd>' +
-        '<dt>NIOSH hazardous</dt><dd data-testid="niosh">' + niosh + '</dd>' +
-        '<dt>Count / bottle</dt><dd>' + show(p.countPerBottle) + '</dd>' +
+        '<dt>NIOSH</dt><dd data-testid="niosh">' + niosh + '</dd>' +
+        '<dt>Count</dt><dd>' + show(p.countPerBottle) + '</dd>' +
         '<dt>Safety cap</dt><dd>' + yesNo(p.safetyCap) + '</dd>' +
-        '<dt>Vial fits</dt><dd>' + vials(p.vialCapacity) + '</dd>' +
         '<dt>In robot</dt><dd>' + yesNo(p.robot) + '</dd>' +
-        '<dt>Preferred NDC</dt><dd>' + yesNo(p.preferred) + '</dd>' +
+        '<dt>Preferred</dt><dd>' + yesNo(p.preferred) + '</dd>' +
+        '<dt>Maker</dt><dd class="span">' + show(p.manufacturer) + '</dd>' +
+        '<dt>Vial fits</dt><dd class="span">' + vials(p.vialCapacity) + '</dd>' +
       '</dl>' +
       (ui.known(p.notes) ? '<div class="notes">' + esc(p.notes) + '</div>' : '');
   }
