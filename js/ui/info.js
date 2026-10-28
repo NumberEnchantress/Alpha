@@ -1,0 +1,82 @@
+/* Info pane: short, scannable facts about the chosen NDC. */
+(function (Alpha) {
+  'use strict';
+  var ui = Alpha.ui, esc = ui.esc, show = ui.show, yesNo = ui.yesNo, UNKNOWN = ui.UNKNOWN;
+
+  // One line saying where it is, with known / estimated / unknown spelled out.
+  function whereText(loc) {
+    if (!loc.location) return { cls: 'unknown', text: 'Location unknown' };
+    var L = loc.location, parts = [L.code === L.name ? L.code : L.code + (L.name ? ' · ' + L.name : '')];
+    var estimated = false;
+    if (L.units.length > 1) {
+      if (loc.unit) {
+        parts.push((loc.unit.label || loc.unit.id) + (loc.unitStatus === 'estimated' ? ' (estimated)' : ''));
+        estimated = estimated || loc.unitStatus === 'estimated';
+      } else parts.push('unit unknown');
+    }
+    if (loc.shelfStatus === 'known') parts.push('shelf ' + loc.shelf + ' of ' + loc.unit.shelves);
+    else if (loc.shelfStatus === 'estimated') { parts.push('shelf ≈' + loc.shelf + ' of ' + loc.unit.shelves + ' (estimated)'); estimated = true; }
+    else if (loc.shelfStatus === 'unknown') parts.push('shelf unknown');
+    return { cls: estimated ? 'estimated' : '', text: parts.join(' — ') };
+  }
+
+  function vials(v) {
+    if (v === 'n/a') return 'not used';
+    if (!v || typeof v !== 'object') return UNKNOWN;
+    return ['20', '40', '60'].map(function (k) { return k + ' dr: ' + show(v[k]); }).join(' · ');
+  }
+
+  function basketKey(scheme) {
+    if (!scheme) return '';
+    var colours = {};
+    scheme.colours.forEach(function (c) { colours[c.id] = c; });
+    var items = scheme.groups.map(function (g) {
+      var sw = g.baskets.map(function (b) {
+        var c = colours[b] || { name: b, hex: '#ffffff' };
+        return '<span class="swatch" style="background:' + esc(c.hex) + '" aria-hidden="true"></span>';
+      }).join('');
+      var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
+      return '<li><strong>' + esc(g.label.replace(/^Group /, '')) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
+    }).join('');
+    return '<h3 class="i-section">Baskets · ' + esc(scheme.name) + '</h3><ul class="baskets" aria-label="Basket groups">' + items + '</ul>';
+  }
+
+  function warningsHtml(warnings) {
+    if (!warnings.length) return '';
+    return '<ul class="warnings">' + warnings.map(function (w) {
+      var label = w.severity === 'danger' ? 'Danger' : w.severity === 'warn' ? 'Warning' : 'Note';
+      var btn = w.equivalent ? '<br><button type="button" class="btn" data-ndc="' + esc(w.equivalent.ndc) + '">Show ' + esc(Alpha.ndc.format(w.equivalent.ndc)) + '</button>' : '';
+      return '<li class="warning ' + esc(w.severity) + '" data-rule="' + esc(w.id) + '"><span class="sev">' + label + '</span>' + esc(w.message) + btn + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  function render(el, p, loc, warnings) {
+    if (!p) {
+      el.innerHTML = '<p class="empty">Type a drug and strength (<kbd>atorva 40</kbd>) or scan or type an NDC.</p>';
+      return;
+    }
+    var where = whereText(loc);
+    var niosh = p.niosh === true ? '<span class="yes-hazard">Yes<span class="tag">HAZARDOUS</span></span>' : yesNo(p.niosh);
+    el.innerHTML =
+      '<h2 class="i-head">' + esc(p.drug) + ' ' + show(p.strength) + '</h2>' +
+      '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' +
+      '<div class="i-loc ' + where.cls + '" data-testid="where">' + esc(where.text) + '</div>' +
+      warningsHtml(warnings) +
+      '<dl class="facts">' +
+        '<dt>Form</dt><dd>' + show(p.form) + '</dd>' +
+        '<dt>Maker</dt><dd>' + show(p.manufacturer) + '</dd>' +
+        '<dt>NIOSH hazardous</dt><dd data-testid="niosh">' + niosh + '</dd>' +
+        '<dt>Count / bottle</dt><dd>' + show(p.countPerBottle) + '</dd>' +
+        '<dt>Safety cap</dt><dd>' + yesNo(p.safetyCap) + '</dd>' +
+        '<dt>Vial fits</dt><dd>' + vials(p.vialCapacity) + '</dd>' +
+        '<dt>In robot</dt><dd>' + yesNo(p.robot) + '</dd>' +
+        '<dt>Preferred NDC</dt><dd>' + yesNo(p.preferred) + '</dd>' +
+      '</dl>' +
+      (ui.known(p.notes) ? '<div class="notes">' + esc(p.notes) + '</div>' : '');
+  }
+
+  // The basket key only changes with the scheme, so it is rendered apart.
+  function renderBaskets(el, scheme) { el.innerHTML = basketKey(scheme); }
+
+  Alpha.info = { render: render, renderBaskets: renderBaskets, whereText: whereText };
+})(window.Alpha);

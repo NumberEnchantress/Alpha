@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpha</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <h1 class="brand">Alpha</h1>
+  <span id="dataset-name" class="dataset"></span>
+  <span id="sample-banner" class="sample-banner" hidden>SAMPLE DATA: fictional, not for dispensing</span>
+  <span class="spacer"></span>
+  <button type="button" id="help-btn" class="btn" aria-haspopup="dialog">Keys <kbd>?</kbd></button>
+  <button type="button" id="settings-btn" class="btn" aria-haspopup="dialog">Settings</button>
+</header>
+
+<main id="main" class="grid has-elev">
+  <section id="elev-pane" class="pane pane-elev" aria-label="Shelf view">
+    <h2 class="pane-title">Shelf view</h2>
+    <div id="elev" class="elev"></div>
+  </section>
+
+  <section class="pane pane-map" aria-label="Floor map">
+    <h2 class="pane-title" id="map-title">Floor map</h2>
+    <div id="map" class="map"></div>
+  </section>
+
+  <aside class="pane pane-side">
+    <div class="search" role="search">
+      <label for="q" class="search-label">Drug and strength, or NDC</label>
+      <input id="q" type="text" autocomplete="off" spellcheck="false" autofocus
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="results"
+             placeholder="e.g. atorva 40">
+      <div id="status" class="status" aria-live="polite"></div>
+    </div>
+    <ul id="results" class="results" role="listbox" aria-label="Matching products"></ul>
+    <div class="info">
+      <section id="info" aria-label="Product details" aria-live="polite"></section>
+      <section id="baskets" aria-label="Basket colours"></section>
+    </div>
+  </aside>
+</main>
+
+<dialog id="help" class="dialog" aria-labelledby="help-title">
+  <h2 id="help-title">Keyboard</h2>
+  <table class="keys">
+    <tr><td><kbd>type</kbd></td><td>search (focus jumps to the search box)</td></tr>
+    <tr><td><kbd>↓</kbd> <kbd>↑</kbd></td><td>move through results</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>choose; the search text is selected for the next search</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>clear the search</td></tr>
+    <tr><td><kbd>?</kbd></td><td>this help (when not typing)</td></tr>
+  </table>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+
+<dialog id="settings" class="dialog" aria-labelledby="settings-title"></dialog>
+
+<script src="vendor/minisearch.min.js"></script>
+<script src="js/core/ndc.js"></script>
+<script src="js/core/locate.js"></script>
+<script src="js/core/rules.js"></script>
+<script src="js/core/check.js"></script>
+<script src="js/core/search.js"></script>
+<script src="data/sample/pharmacy.js"></script>
+<!-- Private store data, if present. A missing file is expected and harmless. -->
+<script src="../data/real/store.js" onerror="this.remove()"></script>
+<script src="js/ui/util.js"></script>
+<script src="js/ui/map.js"></script>
+<script src="js/ui/elevation.js"></script>
+<script src="js/ui/info.js"></script>
+<script src="js/ui/settings.js"></script>
+<script src="js/ui/app.js"></script>
+</body>
+</html>
