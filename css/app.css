@@ -95,9 +95,33 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Map and shelf view */
 .map, .elev { flex: 1; min-height: 0; position: relative; }
 .map svg, .elev svg { width: 100%; height: 100%; display: block; }
-.elev-caption { padding: .4rem .6rem; font-weight: 700; font-size: 1.05rem; border-top: 1px solid #ddd; }
-.elev-caption.estimated { background: var(--est); }
-.elev-msg { padding: .8rem; color: var(--muted); }
+.elev { display: flex; flex-direction: column; overflow-y: auto; }
+.elev-head { padding: .45rem .6rem .2rem; }
+.elev-name { font-size: 1.3rem; font-weight: 800; }
+.elev-sub { color: var(--muted); font-weight: 600; }
+.elev-strip { display: flex; flex-wrap: wrap; gap: .3rem; padding: .2rem .6rem .3rem; }
+.elev-chip { border: 2px solid #888; border-radius: 4px; padding: 0 .35rem; font-size: .9rem; color: var(--muted); }
+.elev-chip.on { border-color: #000; background: var(--hi); color: #000; font-weight: 700; }
+.elev-chip.on.est { background: var(--est); border-style: dashed; }
+.elev-draw { flex: 1; min-height: 12rem; padding: 0 .3rem; }
+.elev-draw svg { width: 100%; height: 100%; }
+.elev-caption { margin: 0; padding: .45rem .6rem; font-weight: 700; font-size: 1.05rem; border-top: 1px solid #ddd; }
+.elev-caption.estimated { background: var(--est); border-top: 2px dashed #000; }
+.elev-caption.unknown { background: #eee; }
+.elev-msg { padding: .8rem; color: var(--muted); margin: 0; }
+.elev-robot { margin: .6rem; padding: 2rem 1rem; text-align: center; font-size: 1.6rem; font-weight: 800; background: #e8dcf5; border: 3px solid #000; border-radius: 10px; }
+.elev svg text { text-anchor: middle; dominant-baseline: central; font-family: var(--font); pointer-events: none; }
+.elev .e-frame { fill: #8d8d86; }
+.elev .e-frame.fridge { fill: #9fc9d3; }
+.elev .e-handle { fill: #555; }
+.elev .s-box { fill: #f7f7f3; stroke: #9a9a94; stroke-width: .3; }
+.elev .s-plank { fill: #6e6e68; }
+.elev .s-num { font-weight: 700; fill: #222; }
+.elev .shelf-hi .s-box { fill: var(--hi); stroke: #000; stroke-width: 1.4; }
+.elev .shelf-est .s-box { fill: url(#ehatch); stroke: #000; stroke-width: 1.2; stroke-dasharray: 3 1.6; }
+.elev .shelf-hi .s-num, .elev .shelf-est .s-num { fill: #000; font-size: 8px; }
+.elev .s-label { font-weight: 800; fill: #000; }
+.elev .s-est { font-weight: 800; fill: #000; letter-spacing: .03em; }
 
 /* Dialogs */
 .dialog { border: 2px solid #333; border-radius: 10px; padding: 1rem 1.2rem; max-width: min(40rem, 95vw); max-height: 90vh; overflow: auto; }
