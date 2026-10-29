@@ -95,6 +95,9 @@
       '</tbody></table>';
   }
 
+  // Rows with at least one note (a row can have several notes).
+  function noteRows(notes) { var seen = {}; notes.forEach(function (n) { seen[n.row] = 1; }); return Object.keys(seen).length; }
+
   function reportHtml(rep) {
     if (!rep) return '';
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>';
@@ -102,7 +105,7 @@
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
       h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
-        p.skipped.length + ' skipped, ' + p.notes.length + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
+        p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
       h += '<p class="small">Columns used: ' + Object.keys(cols.used).map(function (k) { return esc(k) + ' ← "' + esc(cols.used[k]) + '"'; }).join(', ') +
         (cols.unused.length ? '. Ignored: ' + cols.unused.map(function (u) { return '"' + esc(u) + '"'; }).join(', ') : '') +
         (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
@@ -113,7 +116,7 @@
       var r = rep.robot;
       if (r.problem) h += '<p class="note-bad">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
-        (r.movedToRobot ? ' (' + r.movedToRobot + ' had no location and now show the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>';
+        (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>';
       var rrows = r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })
         .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'skipped: ' + x.reason }; }))
         .concat(r.notes.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; }));
