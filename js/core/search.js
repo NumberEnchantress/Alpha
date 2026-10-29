@@ -108,6 +108,8 @@
       else if (ten) (byTen[ten] || []).forEach(function (p) { add(p, 0); });
       // A complete NDC or barcode that is not here must never fall back to a
       // partial match: that would show a different product as if it were it.
+      // Separators in a full-length NDC that fit none of the four shapes.
+      if (!n11 && /[\s\-]/.test(q.trim()) && d.length >= 10) return { results: out, complete: null, badShape: true };
       if (n11 || ten || d.length >= 10) {
         return { results: out, complete: n11 ? ndc.format(n11) : ndc.fromUpc(d) ? 'barcode ' + d : d };
       }
@@ -130,7 +132,7 @@
       res.sort(function (a, b) { return (a.tier - b.tier) || (a.o - b.o); });
       var total = res.length;
       // `complete`: the full NDC or barcode searched for, when the query was one.
-      return { mode: mode, results: limit ? res.slice(0, limit) : res, total: total, complete: nd ? nd.complete : null };
+      return { mode: mode, results: limit ? res.slice(0, limit) : res, total: total, complete: nd ? nd.complete : null, badShape: !!(nd && nd.badShape) };
     }
 
     return { search: search, byNdc: byNdc };

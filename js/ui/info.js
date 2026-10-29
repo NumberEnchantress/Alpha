@@ -38,7 +38,7 @@
         return '<span class="swatch" style="background:' + hex + '" aria-hidden="true"></span>';
       }).join('');
       var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
-      return '<li><strong>' + esc(g.label.replace(/^Group /, '')) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
+      return '<li><strong>' + esc(g.label) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
     }).join('');
     return '<h3 class="i-section">Baskets · ' + esc(scheme.name) + '</h3><ul class="baskets" aria-label="Basket groups">' + items + '</ul>';
   }

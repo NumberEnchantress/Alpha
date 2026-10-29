@@ -18,7 +18,7 @@
     var p = store.get('prefs', null);
     if (p && typeof p === 'object') {
       prefs.scheme = p.scheme || null;
-      prefs.scale = p.scale || '1';
+      prefs.scale = SCALES.some(function (s) { return s[0] === p.scale; }) ? p.scale : '1';
       prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
     }

@@ -37,8 +37,9 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .top .btn kbd { background: #2c3a4a; color: #fff; }
 
 /* Three panes: shelf view (opens on selection), map, search + info */
-.grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 27rem; gap: .5rem; padding: .5rem; }
-.grid.has-elev { grid-template-columns: 17rem minmax(0, 1fr) 28rem; }
+.grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 34vw, 480px); gap: .5rem; padding: .5rem; }
+/* Side columns are sized by the window, not the text size, so "Larger" text does not shrink the map. */
+.grid.has-elev { grid-template-columns: clamp(240px, 20vw, 300px) minmax(0, 1fr) clamp(400px, 34vw, 480px); }
 .pane { background: var(--panel); border: 1px solid #c8c8c2; border-radius: 8px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: strict; }
 .pane-title { font-size: 1rem; margin: 0; padding: .35rem .7rem; border-bottom: 1px solid #ddd; color: var(--muted); font-weight: 600; }
 .pane-side { overflow: hidden; }
@@ -198,3 +199,4 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .report th, .report td { border: 1px solid #bbb; padding: .1rem .35rem; text-align: left; vertical-align: top; }
 .report th { background: #eee; }
 .report td:nth-child(2) { white-space: nowrap; font-family: var(--mono); }
+#info:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
