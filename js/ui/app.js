@@ -25,7 +25,10 @@
     compileRules();
     S.index = Alpha.search.createIndex(S.ds.products || []);
     $('dataset-name').textContent = S.ds.meta.name;
-    $('sample-banner').hidden = !S.ds.meta.sample;
+    var banner = $('sample-banner');
+    banner.hidden = !S.ds.meta.sample && !S.ds.meta.layoutIsSample;
+    banner.textContent = S.ds.meta.sample ? 'SAMPLE DATA: fictional, not for dispensing'
+      : 'Imported products on the SAMPLE layout: map and shelf positions are not real';
     Alpha.map.init($('map'), S.ds.layout);
     Alpha.info.renderBaskets($('baskets'), Alpha.settings.scheme(S.ds));
     if (S.issues.errors.length && window.console) console.warn('Alpha data problems:', S.issues.errors);

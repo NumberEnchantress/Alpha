@@ -90,7 +90,12 @@
 
   function render(el, loc, p) {
     if (!p) { el.innerHTML = '<p class="elev-msg">Choose a product to see its shelf.</p>'; return; }
-    if (!loc.location) { el.innerHTML = '<p class="elev-msg"><strong>Location unknown.</strong> This product has no location in the data.</p>'; return; }
+    if (!loc.location) {
+      el.innerHTML = loc.code != null
+        ? '<p class="elev-msg"><strong>' + esc(loc.code) + ' is not on the map yet.</strong> The layout has no location with that code.</p>'
+        : '<p class="elev-msg"><strong>Location unknown.</strong> This product has no location in the data.</p>';
+      return;
+    }
     if (!loc.unit) {
       var why = loc.unitReason === 'bad-id'
         ? 'The data names unit "' + esc(p.unit) + '", which is not part of ' + esc(loc.location.code) + '.'

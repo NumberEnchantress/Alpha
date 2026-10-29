@@ -187,3 +187,14 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .issue-list { max-height: 12rem; overflow: auto; }
 .issue-list .err { color: var(--danger-line); }
 .dialog-actions { text-align: right; }
+
+/* Import */
+.import-form { display: grid; gap: .4rem; }
+.import-form input[type=file] { font: inherit; display: block; margin-top: .15rem; }
+.import-report { border: 2px solid #333; border-radius: 6px; padding: .4rem .6rem; margin-top: .6rem; }
+.import-report h3 { margin: .2rem 0 .4rem; font-size: 1.05rem; }
+.import-report h4 { margin: .5rem 0 .2rem; font-size: .95rem; }
+.report { border-collapse: collapse; width: 100%; }
+.report th, .report td { border: 1px solid #bbb; padding: .1rem .35rem; text-align: left; vertical-align: top; }
+.report th { background: #eee; }
+.report td:nth-child(2) { white-space: nowrap; font-family: var(--mono); }
