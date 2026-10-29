@@ -5,7 +5,7 @@
   'use strict';
   var ui = Alpha.ui, esc = ui.esc, store = ui.store;
   var memory = null;      // imported state when it could not be saved
-  var lastReport = null;  // shown again when the dialog is rebuilt
+  var lastReport = store.get('importReport', null); // shown again when the dialog is rebuilt
 
   function saved() { return memory || store.get('imported', null); }
 
@@ -18,7 +18,7 @@
   function dataset() {
     var s = saved(), b = base();
     if (!s || !b || !Array.isArray(s.products)) return null;
-    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source);
+    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source, { productsAreSample: !!s.productsAreSample });
     ds.meta.importedAt = s.when;
     return ds;
   }
@@ -49,19 +49,20 @@
       var pf = files[0], rf = files[1];
       if (!pf && !rf) { status.textContent = 'Choose a products CSV, a robot list, or both.'; return; }
       var cur = Alpha.state.ds, layout = (base() || cur).layout;
-      var products, report = { when: new Date().toLocaleString() };
+      var products, lineOf = null, report = { when: new Date().toLocaleString() };
       if (pf) {
         var res = Alpha.importcsv.importProducts(pf.text, layout);
-        products = res.products; report.products = res.report; report.productsFile = pf.name;
+        products = res.products; lineOf = res.lineOf; report.products = res.report; report.productsFile = pf.name;
       } else {
         // Robot list only: apply it to a copy of the products in use now.
         products = JSON.parse(JSON.stringify(cur.products));
       }
-      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: preferred }); report.robotFile = rf.name; }
+      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: preferred, lineOf: lineOf }); report.robotFile = rf.name; }
       var source = [pf && pf.name, rf && rf.name].filter(Boolean).join(' + ');
-      var ok = keep({ products: products, source: source, when: report.when });
+      var ok = keep({ products: products, source: source, when: report.when, productsAreSample: !pf && !!cur.meta.sample });
       report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
       lastReport = report;
+      store.set('importReport', report);
       Alpha.settings.reload();
       Alpha.settings.open(); // rebuild the dialog with the new data and the report
       focusReport();
@@ -69,7 +70,7 @@
   }
 
   function stop() {
-    memory = null; store.remove('imported'); lastReport = null;
+    memory = null; store.remove('imported'); store.remove('importReport'); lastReport = null;
     Alpha.settings.reload();
     Alpha.settings.open();
   }
@@ -99,6 +100,7 @@
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>';
     if (rep.products) {
       var p = rep.products, cols = p.columns;
+      if (p.problem) h += '<p class="note-bad">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
       h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
         p.skipped.length + ' skipped, ' + p.notes.length + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
       h += '<p class="small">Columns used: ' + Object.keys(cols.used).map(function (k) { return esc(k) + ' ← "' + esc(cols.used[k]) + '"'; }).join(', ') +
@@ -109,11 +111,14 @@
     }
     if (rep.robot) {
       var r = rep.robot;
+      if (r.problem) h += '<p class="note-bad">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + ' had no location and now show the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>';
-      h += table(r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })
-        .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; }))
-        .concat(r.notes.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; })), [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Note']]);
+      var rrows = r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })
+        .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'skipped: ' + x.reason }; }))
+        .concat(r.notes.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; }));
+      rrows.sort(function (a, b) { return (a.row === '-' ? 1e9 : a.row) - (b.row === '-' ? 1e9 : b.row); });
+      h += table(rrows, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Note']]);
     }
     return h + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
   }
