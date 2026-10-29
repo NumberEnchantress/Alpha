@@ -97,7 +97,7 @@
     marker.setAttribute('visibility', 'hidden');
     markerEst.setAttribute('visibility', 'hidden');
     if (!loc || !loc.location) {
-      title.textContent = loc ? 'Floor map · location unknown' : 'Floor map';
+      title.textContent = !loc ? 'Floor map' : loc.code != null ? 'Floor map · ' + loc.code + ' is not on the map yet' : 'Floor map · location unknown';
       return;
     }
     var L = loc.location;

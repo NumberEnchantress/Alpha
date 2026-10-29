@@ -5,7 +5,7 @@
 
   // One line saying where it is, with known / estimated / unknown spelled out.
   function whereText(loc) {
-    if (!loc.location) return { cls: 'unknown', text: 'Location unknown' };
+    if (!loc.location) return { cls: 'unknown', text: loc.code != null ? loc.code + ' · not on the map yet' : 'Location unknown' };
     var L = loc.location, parts = [L.code === L.name ? L.code : L.code + (L.name ? ' · ' + L.name : '')];
     var estimated = false;
     if (L.units.length > 1) {

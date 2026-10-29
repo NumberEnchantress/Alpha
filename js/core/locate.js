@@ -63,6 +63,7 @@
   function locate(product, layout) {
     var r = { location: null, unit: null, unitStatus: 'unknown', shelf: null, shelfStatus: 'unknown' };
     if (!product || !layout || product.location == null) return r;
+    r.code = product.location; // kept even when the layout has no such location
     var loc = null;
     for (var i = 0; i < layout.locations.length; i++) {
       if (layout.locations[i].code === product.location) { loc = layout.locations[i]; break; }
