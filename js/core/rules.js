@@ -71,6 +71,10 @@
     else if (fields && !fields[c.field.split('.')[0]]) warnings.push(path + ': unknown field "' + c.field + '" (rule may never fire)');
     if (!Object.prototype.hasOwnProperty.call(OPS, c.op)) { errors.push(path + ': unknown op "' + c.op + '"'); return; }
     if (OPS[c.op] && !('value' in c)) errors.push(path + ': op "' + c.op + '" needs a "value"');
+    else if (OPS[c.op] && (c.value === '' || c.value === null ||
+        (Array.isArray(c.value) && (!c.value.length || c.value.some(function (v) { return v === '' || v === null; }))))) {
+      errors.push(path + ': op "' + c.op + '" needs a value (it is empty)');
+    }
     if (c.op === 'between') {
       if (!(Array.isArray(c.value) && c.value.length === 2)) errors.push(path + ': "between" needs [low, high]');
       else {

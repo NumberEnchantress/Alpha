@@ -2,7 +2,7 @@
    only moves classes and one marker, so it stays cheap on slow machines.
    Highlight: the location's units get a heavy outline; the chosen unit is
    filled. An estimated unit is hatched with a dashed outline and says
-   "EST." beside the marker; an unknown unit leaves every unit of the
+   "EST." next to the marker, on whichever side covers no unit; an unknown unit leaves every unit of the
    location outlined. A marker shows where to stand (the side the unit is
    approached from). Sizes scale with the floor (k), and strokes are in
    screen pixels, so any layout size works. */
@@ -60,7 +60,7 @@
     // Drawn last, so nothing covers it. Its contents are in standard units and
     // the group is scaled by k.
     parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="3"/><text class="marker-text" y="0.1" font-size="1.75">YOU</text>' +
-      '<g class="marker-est" visibility="hidden"><rect x="-3.6" y="3.4" width="7.2" height="2.9" rx="0.5"/><text y="4.85" font-size="2">EST.</text></g></g>');
+      '<g class="marker-est" visibility="hidden"><rect x="-3.6" y="-1.45" width="7.2" height="2.9" rx="0.5"/><text y="0" font-size="2">EST.</text></g></g>');
     parts.push('</svg>');
     el.innerHTML = parts.join('');
     svg = el.firstChild;
@@ -123,9 +123,28 @@
       if (p) {
         marker.setAttribute('transform', 'translate(' + p[0] + ' ' + p[1] + ') scale(' + k + ')');
         marker.setAttribute('visibility', 'visible');
-        markerEst.setAttribute('visibility', loc.unitStatus === 'estimated' ? 'visible' : 'hidden');
+        if (loc.unitStatus === 'estimated') {
+          var off = tagOffset(p);
+          markerEst.setAttribute('transform', 'translate(' + off[0] + ' ' + off[1] + ')');
+          markerEst.setAttribute('visibility', 'visible');
+        }
       }
     }
+  }
+
+  // Where the EST. tag goes, relative to the marker (standard units): the
+  // first of below, right, left, above whose box overlaps no unit or feature.
+  var TAG_SPOTS = [[0, 4.9], [7.3, 0], [-7.3, 0], [0, -4.9]];
+  function tagOffset(p) {
+    var boxes = [];
+    layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(u.rect); }); });
+    (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
+    for (var i = 0; i < TAG_SPOTS.length; i++) {
+      var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k, hw = 3.7 * k, hh = 1.55 * k;
+      var hit = boxes.some(function (r) { return cx + hw > r.x && cx - hw < r.x + r.w && cy + hh > r.y && cy - hh < r.y + r.h; });
+      if (!hit) return TAG_SPOTS[i];
+    }
+    return TAG_SPOTS[0];
   }
 
   function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
