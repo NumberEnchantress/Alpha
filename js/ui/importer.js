@@ -78,7 +78,7 @@
   function download() {
     var ds = Alpha.state.ds;
     var out = JSON.parse(JSON.stringify(ds));
-    out.meta = { id: 'real', name: 'Store data' + (ds.meta.source ? ' from ' + ds.meta.source : ''), sample: false, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
+    out.meta = { id: 'real', name: 'Store data' + (ds.meta.source ? ' from ' + ds.meta.source : ''), sample: !!ds.meta.sample, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
     var text = '/* Store data for Alpha. PRIVATE: keep it out of any public repository. */\n' +
       '(window.ALPHA_DATASETS = window.ALPHA_DATASETS || {}).real = ' + JSON.stringify(out) + ';\n';
     var a = document.createElement('a');
@@ -136,15 +136,15 @@
       '<label>Robot NDC list CSV <input type="file" id="imp-robot" accept=".csv,text/csv,text/plain"></label>' +
       '<label class="opt"><input type="checkbox" id="imp-preferred" checked> NDCs in the robot list are the preferred ones (assumption 4 in NOTES.md)</label>' +
       '<div><button type="button" class="btn" id="imp-go">Import</button> ' +
-      (s ? '<button type="button" class="btn" id="imp-stop">Stop using imported data</button> ' : '') +
-      '<button type="button" class="btn" id="imp-dl">Download as data file</button></div>' +
+      // Only imported data can be downloaded, so the fictional sample is never saved as store data.
+      (s ? '<button type="button" class="btn" id="imp-stop">Stop using imported data</button> ' +
+        '<button type="button" class="btn" id="imp-dl">Download as data file</button>' : '') + '</div>' +
       '<p class="small muted">Columns are matched by name: NDC, drug (or description), strength, form, manufacturer, location, unit, shelf, count, NIOSH, safety cap, 20/40/60 dram, robot, preferred, rank, notes. ' +
       'The downloaded store.js goes in data/real/ and must stay private.</p>' +
       '<p id="imp-status" class="small" role="status"></p></div>' + reportHtml(lastReport);
     el.querySelector('#imp-go').addEventListener('click', function () { doImport(el); });
-    el.querySelector('#imp-dl').addEventListener('click', download);
     var st = el.querySelector('#imp-stop');
-    if (st) st.addEventListener('click', stop);
+    if (st) { st.addEventListener('click', stop); el.querySelector('#imp-dl').addEventListener('click', download); }
   }
 
   // After an import the dialog reopens; move focus to the report.

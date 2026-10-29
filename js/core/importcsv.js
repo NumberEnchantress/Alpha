@@ -36,6 +36,8 @@
   };
   var TRUE = ['yes', 'y', 'true', '1', 'x'], FALSE = ['no', 'n', 'false', '0'];
   var SCI = /^\d+(\.\d+)?e\+?\d+$/i;
+  // A line that starts like an NDC: inside a quoted field it means another record was swallowed.
+  var NDC_START = /^\s*"?(\d{4,5}-\d{3,4}-\d{1,2}|\d{10,12})\b/;
   var BAD_QUOTE = 'a quote on this line is not closed or is misplaced, so the line could not be read; it was skipped and reading went on with the next line';
 
   function key(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
@@ -65,15 +67,20 @@
      delimiter are kept and get a note. */
   function lines(text) {
     var t = String(text || '').replace(/^﻿/, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
-    var out = [], base = 0, line = 1;
+    var out = [], base = 0, line = 1, expected = null; // cells in the first row
     while (base < t.length) {
       var sub = t.slice(base), prev = 0, l = line, restartAt = -1;
       Papa.parse(sub, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
         var cur = r.meta.cursor, cells = r.data;
-        var merged = cells.some(function (c) {
+        // A field with a line break is a merged record when a later line in
+        // it has the delimiter or starts like an NDC, when the file has one
+        // column (robot lists), or when the row's field count differs from
+        // the first row's.
+        var multi = cells.some(function (c) { return String(c).indexOf('\n') >= 0; });
+        var merged = multi && (expected === 1 || (expected != null && cells.length !== expected) || cells.some(function (c) {
           var parts = String(c).split('\n');
-          return parts.length > 1 && parts.slice(1).some(function (s) { return s.indexOf(delim) >= 0; });
-        });
+          return parts.length > 1 && parts.slice(1).some(function (s) { return s.indexOf(delim) >= 0 || NDC_START.test(s); });
+        }));
         if (merged || (r.errors || []).some(function (e) { return e.type === 'Quotes'; })) {
           out.push({ cells: cells, line: l, endLine: l, badQuote: true });
           var j = sub.indexOf('\n', prev);
@@ -83,7 +90,10 @@
         }
         // Line breaks inside the row's fields give the line it ends on.
         var inner = cells.join('').split('\n').length - 1;
-        if (cells.some(function (c) { return String(c).trim() !== ''; })) out.push({ cells: cells, line: l, endLine: l + inner });
+        if (cells.some(function (c) { return String(c).trim() !== ''; })) {
+          out.push({ cells: cells, line: l, endLine: l + inner });
+          if (expected == null) expected = cells.length;
+        }
         l += countBreaks(sub, prev, cur);
         prev = cur;
       } });
@@ -103,7 +113,7 @@
       fields.forEach(function (f, i) { if (!(f in o)) o[f] = r.cells[i]; });
       return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, badQuote: r.badQuote, cells: r.cells };
     });
-    return { rows: rows, fields: fields, empty: l.empty, headBad: !!(head && head.badQuote), headLine: head ? head.line : 1 };
+    return { rows: rows, fields: fields, empty: l.empty, headBad: !!(head && (head.badQuote || head.endLine > head.line)), headLine: head ? head.line : 1 };
   }
 
   function mapColumns(fields) {
@@ -176,7 +186,7 @@
     var products = [], seen = {}, lineOf = {};
     if (p.empty) { report.problem = 'The file is empty.'; return { products: products, lineOf: lineOf, report: report }; }
     if (p.headBad) {
-      report.problem = 'The header (line ' + p.headLine + ') has a quote problem, so the columns cannot be known. Fix that line and import again.';
+      report.problem = 'The header (line ' + p.headLine + ') has a quote problem or runs over several lines, so the columns cannot be known. Fix that line and import again.';
       p.rows.forEach(function (r) { report.skipped.push({ row: r.line, ndc: '', reason: 'header could not be read' }); });
       return { products: products, lineOf: lineOf, report: report };
     }
@@ -199,18 +209,29 @@
       }
       if (row.endLine > line) note('this row runs over lines ' + line + '-' + row.endLine + ' (a quoted field with line breaks); check nothing was merged');
       var rawNdc = get('ndc');
+      // Values are matched to columns by position, so a row with a different
+      // number of fields may be shifted: skip it rather than guess. Extra
+      // fields that are all blank (trailing commas) are fine.
+      var extraBlank = row.count > p.fields.length && row.cells.slice(p.fields.length).every(function (c) { return !String(c).trim(); });
+      if (row.count !== p.fields.length && !extraBlank) {
+        report.skipped.push({ row: line, ndc: rawNdc, reason: 'has ' + row.count + ' fields but the header has ' + p.fields.length + ', so its columns cannot be matched safely' });
+        return;
+      }
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       seen[n] = line; lineOf[n] = line;
-      if (row.count !== p.fields.length) note('has ' + row.count + ' fields but the header has ' + p.fields.length + '; check the columns on this line');
 
       var prod = { ndc: n, drug: drug };
       var strength = get('strength'), form = get('form');
       if (!m.strength) {
         var sm = DESC.exec(drug);
+        if (sm && (/^\//.test(sm[3].trim()) || DESC.test(sm[3].trim()) || /\d\s*(mg|mcg|g|ml)\b/i.test(sm[3]))) {
+          note('"' + drug + '" looks like a combination product, so it was not split into drug and strength');
+          sm = null;
+        }
         if (sm) {
           prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
           var rest = sm[3].trim(), restUsed = !form && !!rest;
@@ -305,6 +326,7 @@
       report.notes.push({ row: rows[0].line, ndc: '', note: 'read as a header line: "' + first.join(',') + '"' });
     }
     report.rows = rows.length - start;
+    if (!report.rows) { report.problem = 'The robot list has a header line but no NDCs.'; return report; }
 
     var byNdc = {};
     products.forEach(function (p) { byNdc[p.ndc] = p; });
@@ -312,7 +334,7 @@
     var seen = {};
     for (var i = start; i < rows.length; i++) {
       var line = rows[i].line;
-      if (rows[i].badQuote) { report.skipped.push({ row: line, ndc: '', reason: BAD_QUOTE }); continue; }
+      if (rows[i].badQuote) { report.skipped.push({ row: line, ndc: String(rows[i].cells[col] || '').split('\n')[0].trim().slice(0, 20), reason: BAD_QUOTE }); continue; }
       var raw = String(rows[i].cells[col] || '').trim(), n = ndc.normalize(raw);
       if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
