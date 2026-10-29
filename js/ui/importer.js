@@ -77,7 +77,7 @@
   function download() {
     var ds = Alpha.state.ds;
     var out = JSON.parse(JSON.stringify(ds));
-    out.meta = { id: 'real', name: ds.layout.name, sample: false, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
+    out.meta = { id: 'real', name: 'Store data' + (ds.meta.source ? ' from ' + ds.meta.source : ''), sample: false, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
     var text = '/* Store data for Alpha. PRIVATE: keep it out of any public repository. */\n' +
       '(window.ALPHA_DATASETS = window.ALPHA_DATASETS || {}).real = ' + JSON.stringify(out) + ';\n';
     var a = document.createElement('a');
@@ -112,7 +112,8 @@
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + ' had no location and now show the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>';
       h += table(r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })
-        .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; })), [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]);
+        .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; }))
+        .concat(r.notes.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; })), [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Note']]);
     }
     return h + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
   }

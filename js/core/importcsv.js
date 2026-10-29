@@ -37,9 +37,30 @@
 
   function key(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
+  // Every non-blank row with the file line it starts on (blank lines and
+  // line breaks inside quoted fields are counted), plus CSV syntax problems.
+  function lines(text) {
+    var t = String(text || '').replace(/^\uFEFF/, ''), out = [], errors = [], prev = 0, line = 1;
+    Papa.parse(t, { skipEmptyLines: false, step: function (r) {
+      var cur = r.meta.cursor, cells = r.data;
+      if (cells.some(function (c) { return String(c).trim() !== ''; })) out.push({ cells: cells, line: line });
+      (r.errors || []).forEach(function (e) { errors.push({ line: line, message: e.message }); });
+      for (var i = prev; i < cur; i++) if (t.charCodeAt(i) === 10) line++;
+      prev = cur;
+    } });
+    return { rows: out, errors: errors };
+  }
+
+  // The first non-blank row is the header.
   function parse(text) {
-    var res = Papa.parse(String(text || '').replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy' });
-    return { rows: res.data, fields: res.meta.fields || [], errors: res.errors };
+    var l = lines(text), head = l.rows.shift();
+    var fields = head ? head.cells.map(function (f) { return String(f).trim(); }) : [];
+    var rows = l.rows.map(function (r) {
+      var o = {};
+      fields.forEach(function (f, i) { if (!(f in o)) o[f] = r.cells[i]; });
+      return { data: o, line: r.line, count: r.cells.length };
+    });
+    return { rows: rows, fields: fields, errors: l.errors };
   }
 
   function mapColumns(fields) {
@@ -74,6 +95,7 @@
   function whyBadNdc(raw) {
     var d = ndc.digits(raw);
     if (!raw) return 'no NDC';
+    if (/^\d+(\.\d+)?e\+?\d+$/i.test(String(raw).trim())) return 'NDC "' + raw + '" was turned into a number by a spreadsheet (scientific notation); format the column as text and export again';
     if (d.length === 10) return 'NDC "' + raw + '" has 10 digits and no hyphens, so the 5-4-2 form cannot be known';
     if (d.length < 10) return 'NDC "' + raw + '" is too short (leading zeros lost in a spreadsheet?)';
     return 'NDC "' + raw + '" is not a valid NDC';
@@ -100,15 +122,15 @@
     var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [],
       columns: { used: m, unused: cols.unused, missing: [] } };
     ['ndc', 'drug', 'location', 'shelf'].forEach(function (c) { if (!m[c]) report.columns.missing.push(c); });
-    p.errors.forEach(function (e) { report.notes.push({ row: e.row == null ? '?' : e.row + 2, ndc: '', note: 'CSV problem: ' + e.message }); });
+    p.errors.forEach(function (e) { report.notes.push({ row: e.line, ndc: '', note: 'CSV problem: ' + e.message }); });
     var products = [], seen = {};
     if (!m.ndc) {
       report.skipped.push({ row: '-', ndc: '', reason: 'No NDC column found. Expected a header such as "NDC".' });
       return { products: products, report: report };
     }
 
-    p.rows.forEach(function (r, i) {
-      var line = i + 2; // header is line 1
+    p.rows.forEach(function (row) {
+      var r = row.data, line = row.line;
       var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
@@ -118,6 +140,7 @@
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       seen[n] = line;
+      if (row.count !== p.fields.length) note('has ' + row.count + ' fields but the header has ' + p.fields.length + '; check the columns on this line');
 
       var prod = { ndc: n, drug: drug };
       var strength = get('strength'), form = get('form');
@@ -133,7 +156,10 @@
       var loc = null, rawLoc = get('location');
       if (rawLoc) {
         loc = findLocation(rawLoc, layout);
-        if (loc) prod.location = loc.code;
+        if (loc) {
+          prod.location = loc.code;
+          if (loc.code.toUpperCase() !== rawLoc.toUpperCase()) note('location "' + rawLoc + '" read as ' + loc.code);
+        }
         else { prod.location = rawLoc.toUpperCase(); note('location "' + rawLoc + '" is not on the layout yet; the map will say so'); }
       }
       var unit = null, rawUnit = get('unit');
@@ -167,15 +193,18 @@
         else if (b.value != null) prod[f] = b.value;
       });
 
-      var vial = {}, anyVial = false;
+      // Vial capacities: numbers, or "n/a" for products not put in vials.
+      var vial = {}, nums = 0, nas = 0;
       ['20', '40', '60'].forEach(function (d) {
         var raw = get('vial' + d);
-        if (/^n\/?a$/i.test(raw)) { vial = 'n/a'; anyVial = true; return; }
+        if (/^n\/?a$/i.test(raw)) { nas++; return; }
         var v = int(raw, 1);
         if (v.bad) note(d + ' dram "' + raw + '" is not a whole number; left unknown');
-        else if (v.value != null && vial !== 'n/a') { vial[d] = v.value; anyVial = true; }
+        else if (v.value != null) { vial[d] = v.value; nums++; }
       });
-      if (anyVial) prod.vialCapacity = vial;
+      if (nas && nums) note('vial sizes mix "n/a" and numbers; vial capacity left unknown');
+      else if (nas) prod.vialCapacity = 'n/a';
+      else if (nums) prod.vialCapacity = vial;
 
       products.push(prod);
       report.imported++;
@@ -188,25 +217,33 @@
      in the products are reported, not invented. Returns a report. */
   function applyRobotList(text, products, layout, opts) {
     opts = opts || {};
-    var rows = Papa.parse(String(text || '').replace(/^﻿/, ''), { skipEmptyLines: 'greedy' }).data;
-    var col = 0, start = 0;
+    var l = lines(text), rows = l.rows, col = 0, start = 0;
     if (rows.length) {
-      var hdr = rows[0].map(key), at = -1;
+      var first = rows[0].cells, hdr = first.map(key), at = -1;
       hdr.forEach(function (h, i) { if (at < 0 && COLUMNS.ndc.indexOf(h) >= 0) at = i; });
       if (at >= 0) { col = at; start = 1; }
-      else if (!ndc.normalize(rows[0][0])) start = 1; // some other header
+      // Some other header: only if the first row has no run of 5+ digits.
+      else if (!first.some(function (c) { return /\d{5}/.test(c); })) start = 1;
     }
     var byNdc = {};
     products.forEach(function (p) { byNdc[p.ndc] = p; });
-    var robotLoc = layout.locations.filter(function (l) { return l.kind === 'robot'; })[0];
-    var report = { rows: rows.length - start, matched: 0, notFound: [], skipped: [], movedToRobot: 0 };
+    var robotLoc = layout.locations.filter(function (lc) { return lc.kind === 'robot'; })[0];
+    var report = { rows: rows.length - start, matched: 0, notFound: [], skipped: [], notes: [], movedToRobot: 0 };
+    l.errors.forEach(function (e) { report.notes.push({ row: e.line, ndc: '', note: 'CSV problem: ' + e.message }); });
+    var seen = {};
     for (var i = start; i < rows.length; i++) {
-      var raw = String(rows[i][col] || '').trim(), n = ndc.normalize(raw);
-      if (!n) { report.skipped.push({ row: i + 1, ndc: raw, reason: whyBadNdc(raw) }); continue; }
+      var line = rows[i].line, raw = String(rows[i].cells[col] || '').trim(), n = ndc.normalize(raw);
+      if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
+      if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
+      seen[n] = line;
       var p = byNdc[n];
-      if (!p) { report.notFound.push({ row: i + 1, ndc: raw }); continue; }
+      if (!p) { report.notFound.push({ row: line, ndc: raw }); continue; }
+      if (p.robot === false) report.notes.push({ row: line, ndc: raw, note: 'the products file said not in the robot; the robot list wins' });
       p.robot = true;
-      if (opts.preferred) p.preferred = true;
+      if (opts.preferred) {
+        if (p.preferred === false) report.notes.push({ row: line, ndc: raw, note: 'the products file said not preferred; marked preferred because it is in the robot' });
+        p.preferred = true;
+      }
       if (robotLoc && p.location == null) { p.location = robotLoc.code; report.movedToRobot++; }
       report.matched++;
     }

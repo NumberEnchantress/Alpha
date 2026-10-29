@@ -75,7 +75,8 @@
     var st = '';
     if (r.mode === 'empty') st = '';
     else if (!r.total) {
-      st = r.badShape ? '“' + q.trim() + '” is not an NDC shape. Use 5-4-2, 4-4-2, 5-3-2 or 5-4-1, or the digits alone.'
+      st = r.badCheck ? 'Barcode ' + q.trim() + ' fails its check digit: scan it again or type the NDC.'
+        : r.badShape ? '“' + q.trim() + '” is not an NDC shape. Use 5-4-2, 4-4-2, 5-3-2 or 5-4-1, or the digits alone.'
         : r.complete ? 'No product with NDC ' + r.complete + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
     } else {
       st = r.total + (r.total === 1 ? ' match' : ' matches') + (r.total > 3 ? ', most used first' : '') +
