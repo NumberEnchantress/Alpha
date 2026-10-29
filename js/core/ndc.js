@@ -45,15 +45,24 @@
     return out;
   }
 
+  // UPC-A check digit for the first 11 digits.
+  function upcCheck(d11) {
+    var sum = 0;
+    for (var i = 0; i < 11; i++) sum += Number(d11[i]) * (i % 2 === 0 ? 3 : 1);
+    return String((10 - sum % 10) % 10);
+  }
+  function isUpcShape(s) { var d = digits(s); return d.length === 12 && d[0] === '3'; }
   // A UPC-A barcode on US drug packaging is "3" + 10-digit NDC + check digit.
+  // Returns the 10 digits, or null if it is not one or the check digit is wrong.
   function fromUpc(s) {
     var d = digits(s);
-    if (d.length === 12 && d[0] === '3') return d.slice(1, 11);
+    if (isUpcShape(d) && upcCheck(d) === d[11]) return d.slice(1, 11);
     return null;
   }
+  function upcFor(ten) { var d = '3' + ten; return d + upcCheck(d); }
 
   function isFakeLabeler(n11) { return /^99999\d{6}$/.test(n11 || ''); }
 
   return { digits: digits, normalize: normalize, format: format,
-    tenDigitForms: tenDigitForms, fromUpc: fromUpc, isFakeLabeler: isFakeLabeler };
+    tenDigitForms: tenDigitForms, fromUpc: fromUpc, upcFor: upcFor, isUpcShape: isUpcShape, isFakeLabeler: isFakeLabeler };
 });
