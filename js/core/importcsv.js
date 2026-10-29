@@ -42,9 +42,8 @@
 
   /* ---------- reading the file ---------- */
 
-  // A line break: \n, or a \r not followed by \n (old Mac files use \r alone).
-  function isBreak(t, i) { var c = t.charCodeAt(i); return c === 10 || (c === 13 && t.charCodeAt(i + 1) !== 10); }
-  function countBreaks(t, a, b) { var n = 0; for (var i = a; i < b; i++) if (isBreak(t, i)) n++; return n; }
+  // Line endings are normalised to \n before reading (CRLF, CR and mixtures).
+  function countBreaks(t, a, b) { var n = 0; for (var i = a; i < b; i++) if (t.charCodeAt(i) === 10) n++; return n; }
 
   // Comma unless the first non-blank line has more semicolons or tabs.
   function delimiterOf(t) {
@@ -56,26 +55,35 @@
     return best;
   }
 
-  /* Every non-blank row with the line it starts on (blank lines and line
-     breaks inside quoted fields counted). A row with a quote problem is
-     returned with badQuote and reading restarts on the next physical line,
-     so one stray quote cannot swallow the rest of the file. */
+  /* Every non-blank row with the line it starts on and the line it ends on.
+     A row that may have swallowed other rows is returned with badQuote, and
+     reading restarts on the next physical line, so one stray quote cannot
+     take the rest of the file with it. That is: PapaParse reports a quote
+     error, or a field holds a line break followed by a line that has the
+     delimiter in it (a merged record, e.g. an unclosed quote that a later
+     inch mark happened to close). Legitimate multi-line fields without the
+     delimiter are kept and get a note. */
   function lines(text) {
-    var t = String(text || '').replace(/^﻿/, ''), delim = delimiterOf(t);
+    var t = String(text || '').replace(/^﻿/, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
     var out = [], base = 0, line = 1;
     while (base < t.length) {
       var sub = t.slice(base), prev = 0, l = line, restartAt = -1;
       Papa.parse(sub, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
         var cur = r.meta.cursor, cells = r.data;
-        if ((r.errors || []).some(function (e) { return e.type === 'Quotes'; })) {
-          out.push({ cells: cells, line: l, badQuote: true });
-          var j = prev;
-          while (j < sub.length && !isBreak(sub, j)) j++;
-          restartAt = Math.min(sub.length, j + 1);
+        var merged = cells.some(function (c) {
+          var parts = String(c).split('\n');
+          return parts.length > 1 && parts.slice(1).some(function (s) { return s.indexOf(delim) >= 0; });
+        });
+        if (merged || (r.errors || []).some(function (e) { return e.type === 'Quotes'; })) {
+          out.push({ cells: cells, line: l, endLine: l, badQuote: true });
+          var j = sub.indexOf('\n', prev);
+          restartAt = j < 0 ? sub.length : j + 1;
           parser.abort();
           return;
         }
-        if (cells.some(function (c) { return String(c).trim() !== ''; })) out.push({ cells: cells, line: l });
+        // Line breaks inside the row's fields give the line it ends on.
+        var inner = cells.join('').split('\n').length - 1;
+        if (cells.some(function (c) { return String(c).trim() !== ''; })) out.push({ cells: cells, line: l, endLine: l + inner });
         l += countBreaks(sub, prev, cur);
         prev = cur;
       } });
@@ -93,9 +101,9 @@
     var rows = l.rows.map(function (r) {
       var o = {};
       fields.forEach(function (f, i) { if (!(f in o)) o[f] = r.cells[i]; });
-      return { data: o, line: r.line, count: r.cells.length, badQuote: r.badQuote };
+      return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, badQuote: r.badQuote, cells: r.cells };
     });
-    return { rows: rows, fields: fields, empty: l.empty };
+    return { rows: rows, fields: fields, empty: l.empty, headBad: !!(head && head.badQuote), headLine: head ? head.line : 1 };
   }
 
   function mapColumns(fields) {
@@ -119,7 +127,8 @@
   }
   // Whole number >= min. { value } or { bad: 'reason' }.
   function int(v, min) {
-    var s = String(v == null ? '' : v).trim().replace(/,/g, '');
+    var s = String(v == null ? '' : v).trim();
+    if (/^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, ''); // 1,000 -> 1000; "1,5" stays bad
     if (!s) return { value: undefined };
     if (!/^\d+$/.test(s)) return { bad: 'is not a whole number' };
     if (Number(s) < min) return { bad: 'is below ' + min };
@@ -166,6 +175,11 @@
       columns: { used: m, unused: cols.unused, missing: [] } };
     var products = [], seen = {}, lineOf = {};
     if (p.empty) { report.problem = 'The file is empty.'; return { products: products, lineOf: lineOf, report: report }; }
+    if (p.headBad) {
+      report.problem = 'The header (line ' + p.headLine + ') has a quote problem, so the columns cannot be known. Fix that line and import again.';
+      p.rows.forEach(function (r) { report.skipped.push({ row: r.line, ndc: '', reason: 'header could not be read' }); });
+      return { products: products, lineOf: lineOf, report: report };
+    }
     if (!p.rows.length) { report.problem = 'The file has a header line but no rows.'; return { products: products, lineOf: lineOf, report: report }; }
     ['ndc', 'drug', 'location', 'shelf'].forEach(function (c) { if (!m[c]) report.columns.missing.push(c); });
     if (!m.ndc) {
@@ -178,7 +192,12 @@
       var r = row.data, line = row.line;
       var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
-      if (row.badQuote) { report.skipped.push({ row: line, ndc: '', reason: BAD_QUOTE }); return; }
+      if (row.badQuote) {
+        var first = String(row.cells[p.fields.indexOf(m.ndc)] || '').split('\n')[0].trim().slice(0, 20);
+        report.skipped.push({ row: line, ndc: first, reason: BAD_QUOTE });
+        return;
+      }
+      if (row.endLine > line) note('this row runs over lines ' + line + '-' + row.endLine + ' (a quoted field with line breaks); check nothing was merged');
       var rawNdc = get('ndc');
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
@@ -193,10 +212,12 @@
       if (!m.strength) {
         var sm = DESC.exec(drug);
         if (sm) {
-          prod.drug = sm[1].trim(); strength = sm[2].trim();
-          if (!form && sm[3]) form = sm[3].trim();
+          prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
+          var rest = sm[3].trim(), restUsed = !form && !!rest;
+          if (restUsed) form = rest;
           report.split++;
-          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (form && !get('form') ? ', form "' + form + '"' : ''));
+          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed ? ', form "' + form + '"' : '') +
+            (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : ''));
         }
       }
       if (strength) prod.strength = strength;
@@ -227,7 +248,7 @@
       var sh = int(get('shelf'), 1);
       if (sh.bad) note('shelf "' + get('shelf') + '" ' + sh.bad + ' (shelves are numbered from 1 at the top); shelf left unknown');
       else if (sh.value != null) {
-        if (!unit) note('shelf ' + sh.value + ' ignored: ' + unitWhy);
+        if (!unit) note('shelf ' + sh.value + ' ignored: ' + unitWhy + (loc && !rawUnit ? '; the app will estimate the unit and shelf from the alphabet and mark them estimated' : ''));
         else if (sh.value > unit.shelves) note('shelf ' + sh.value + ' does not fit ' + unit.id + ' (' + unit.shelves + ' shelves); shelf left unknown');
         else prod.shelf = sh.value;
       }
@@ -303,6 +324,9 @@
       if (opts.preferred) {
         if (p.preferred === false) report.notes.push({ row: line, ndc: raw, note: 'the products file said not preferred; marked preferred because it is in the robot' });
         p.preferred = true;
+      }
+      if (p.location != null && (!robotLoc || p.location !== robotLoc.code)) {
+        report.notes.push({ row: line, ndc: raw, note: 'also has location ' + p.location + ' in the products file; both kept (the map shows ' + p.location + ')' });
       }
       if (robotLoc && p.location == null) {
         p.location = robotLoc.code; report.movedToRobot++;
