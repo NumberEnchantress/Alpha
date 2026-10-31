@@ -174,9 +174,8 @@
     // Settings changed in another window: take them, so an older window does
     // not later save its stale copy over them.
     window.addEventListener('storage', function (e) {
-      if (e.key !== 'alpha.prefs') return;
-      load(); changed();
-      if (dlg.open) build();
+      if (e.key === 'alpha.prefs') { load(); changed(); if (dlg.open) build(); }
+      else if (e.key && e.key.indexOf('alpha.preset.') === 0 && dlg.open) build();
     });
   }
 
