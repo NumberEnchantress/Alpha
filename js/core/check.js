@@ -8,7 +8,7 @@
 })(typeof self !== 'undefined' ? self : this, function (root) {
   'use strict';
   var A = typeof require === 'function'
-    ? { ndc: require('./ndc'), locate: require('./locate'), rules: require('./rules') }
+    ? { ndc: require('./ndc'), locate: require('./locate'), rules: require('./rules'), presets: require('./presets') }
     : root.Alpha;
 
   function checkDataset(ds) {
@@ -87,6 +87,7 @@
     (ds.basketSchemes || []).forEach(function (s, i) {
       var where = 'basketSchemes[' + i + '] (' + s.id + ')';
       if (schemeIds[s.id]) errors.push(where + ': duplicate scheme id');
+      A.presets.check(s).forEach(function (e) { errors.push(where + ': ' + e); });
       schemeIds[s.id] = 1;
       var colours = {};
       (s.colours || []).forEach(function (c) {

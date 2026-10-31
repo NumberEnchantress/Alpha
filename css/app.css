@@ -200,3 +200,25 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .report th { background: #eee; }
 .report td:nth-child(2) { white-space: nowrap; font-family: var(--mono); }
 #info:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Basket presets page */
+.dialog.wide { max-width: min(62rem, 96vw); width: 62rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.preset-list { list-style: none; padding: 0; margin: .4rem 0; display: grid; gap: .45rem; }
+.preset-row { border: 2px solid #bbb; border-radius: 6px; padding: .35rem .55rem; }
+.preset-row.in-use { border-color: #000; background: #fffbe0; }
+.preset-groups { display: flex; flex-wrap: wrap; gap: .15rem .9rem; margin: .2rem 0 .3rem; }
+.pg { display: inline-flex; align-items: center; gap: .2rem; white-space: nowrap; }
+.pe-top { display: flex; gap: .5rem; align-items: center; margin: .3rem 0; }
+.file-btn { position: relative; display: inline-flex; align-items: center; }
+.file-btn input[type=file] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.file-btn:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.preset-editor label { font-weight: 600; }
+.preset-editor #pe-name { font: inherit; padding: .25rem .4rem; width: 20rem; max-width: 100%; margin-left: .3rem; }
+.pe-table { border-collapse: collapse; margin: .5rem 0; width: 100%; }
+.pe-table th, .pe-table td { text-align: left; padding: .2rem .35rem; border-bottom: 1px solid #ddd; vertical-align: middle; }
+.pe-table select, .pe-table input { font: inherit; padding: .15rem .25rem; }
+.pe-table .own-label { margin-left: .35rem; width: 11rem; }
+.pe-errors { color: var(--danger-line); font-weight: 600; margin: .4rem 0; padding-left: 1.2rem; }
+.pe-errors:empty { display: none; }
+.pe-buttons { margin-top: .4rem; }
