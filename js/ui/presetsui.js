@@ -7,14 +7,22 @@
   var ui = Alpha.ui, esc = ui.esc, store = ui.store, P = Alpha.presets;
   var OWN = '__own__', NONE = '';
 
-  var mine = loadMine(), memoryOnly = false;
+  // Stored presets that fail the checks are kept as they are (never dropped),
+  // and the page says so.
+  var broken = [], mine = loadMine(), memoryOnly = false;
   var dlg = null, editing = null, status = '';
 
   function loadMine() {
-    var v = store.get('presets', []);
-    return Array.isArray(v) ? v.filter(function (p) { return p && !P.check(p).length; }) : [];
+    var v = store.get('presets', []), ok = [];
+    (Array.isArray(v) ? v : []).forEach(function (p) { if (p && !P.check(p).length) ok.push(p); else broken.push(p); });
+    return ok;
   }
-  function persist() { memoryOnly = !store.set('presets', mine); }
+  function persist() { memoryOnly = !store.set('presets', mine.concat(broken)); }
+
+  // Unsaved changes in the editor?
+  function dirty() { return !!editing && JSON.stringify(strip(editing.draft)) !== editing.start; }
+  function strip(d) { return { name: d.name, colours: d.colours, groups: d.groups.map(function (g) { return { label: g.label, baskets: g.baskets }; }) }; }
+  function okToDiscard() { return !dirty() || window.confirm('Discard the changes to this preset?'); }
 
   function builtIn(ds) { return (ds && ds.basketSchemes) || []; }
   function all(ds) { return builtIn(ds).concat(mine); }
@@ -84,7 +92,7 @@
     }).join('') + '<option value="' + OWN + '"' + (own ? ' selected' : '') + '>Type your own…</option>';
     return '<select id="pl-' + i + '" data-i="' + i + '" data-f="label" aria-label="Group ' + (i + 1) + ' label">' + opts + '</select>' +
       '<input type="text" id="po-' + i + '" data-i="' + i + '" data-f="own" class="own-label" aria-label="Group ' + (i + 1) + ' label, typed"' +
-      ' value="' + esc(own ? g.label : '') + '"' + (own ? '' : ' hidden') + ' placeholder="Label">';
+      ' maxlength="' + P.MAX_LABEL + '" value="' + esc(own ? g.label : '') + '"' + (own ? '' : ' hidden') + ' placeholder="Label">';
   }
 
   function basketCell(i, b, value, colours) {
@@ -101,7 +109,7 @@
   function editorHtml(ds) {
     var d = editing.draft, choices = labelChoices(ds), colours = colourChoices(d);
     return '<fieldset class="preset-editor"><legend>' + (editing.origId ? 'Edit preset' : 'New preset') + '</legend>' +
-      '<label>Name <input type="text" id="pe-name" value="' + esc(d.name) + '" placeholder="e.g. Our 9 baskets"></label>' +
+      '<label>Name <input type="text" id="pe-name" maxlength="' + P.MAX_NAME + '" value="' + esc(d.name) + '" placeholder="e.g. Our 9 baskets"></label>' +
       '<table class="pe-table"><thead><tr><th>#</th><th>Group label</th><th>Basket 1</th><th>Basket 2</th><th><span class="sr">Remove</span></th></tr></thead><tbody>' +
       d.groups.map(function (g, i) {
         return '<tr><td>' + (i + 1) + '</td><td>' + labelCell(i, g, choices) + '</td><td>' + basketCell(i, 0, g.baskets[0], colours) + '</td>' +
@@ -109,7 +117,7 @@
           '<td><button type="button" class="btn small" data-act="remove-group" data-i="' + i + '" aria-label="Remove group ' + (i + 1) + '"' +
           (d.groups.length <= P.MIN_GROUPS ? ' disabled' : '') + '>Remove</button></td></tr>';
       }).join('') + '</tbody></table>' +
-      '<button type="button" class="btn small" data-act="add-group">Add a group</button>' +
+      '<button type="button" class="btn small" data-act="add-group"' + (d.groups.length >= P.MAX_GROUPS ? ' disabled' : '') + '>Add a group</button>' +
       '<ul id="pe-errors" class="pe-errors" role="alert"></ul>' +
       '<div class="pe-buttons"><button type="button" class="btn" data-act="save">Save</button> ' +
       '<button type="button" class="btn" data-act="save-use">Save and use</button> ' +
@@ -121,19 +129,25 @@
     dlg.innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
+      (broken.length ? '<p class="note-bad small">' + broken.length + ' saved preset(s) could not be read and are kept unchanged in this browser\'s storage.</p>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
-      '<p id="pe-status" class="small" role="status">' + esc(status) + '</p>' +
+      '<p id="pe-status" class="small" role="status" tabindex="-1">' + esc(status) + '</p>' +
       (editing ? editorHtml(ds) : '') +
-      '<form method="dialog" class="dialog-actions"><button class="btn">Close</button></form>';
+      '<div class="dialog-actions"><button type="button" class="btn" data-act="close">Close</button></div>';
     if (editing) showErrors();
     var f = focusSel && dlg.querySelector(focusSel);
     if (f) f.focus();
   }
 
+  function nameTaken(name, exceptId) {
+    var n = String(name || '').trim().toLowerCase();
+    return all(Alpha.state.ds).some(function (p) { return p.id !== exceptId && p.name.toLowerCase() === n; });
+  }
   function showErrors() {
     var errs = P.check(editing.draft), el = dlg.querySelector('#pe-errors');
+    if (nameTaken(editing.draft.name, editing.origId)) errs.unshift('Another preset already has this name.');
     el.innerHTML = errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('');
     return errs;
   }
@@ -142,7 +156,7 @@
   function startEdit(p, origId) {
     var d = JSON.parse(JSON.stringify(p));
     d.groups.forEach(function (g) { g.own = false; });
-    editing = { origId: origId, draft: d };
+    editing = { origId: origId, draft: d, start: JSON.stringify(strip(d)) };
     status = '';
     render('#pe-name');
   }
@@ -167,7 +181,6 @@
       t.id = editing.origId;
       mine = mine.map(function (p) { return p.id === t.id ? t : p; });
     } else {
-      t.name = uniqueName(t.name);
       t.id = uniqueId(t.name);
       mine.push(t);
     }
@@ -189,6 +202,8 @@
   function loadFile(input) {
     var f = input.files && input.files[0];
     if (!f) return;
+    input.value = ''; // the same file can be chosen again
+    if (f.size > P.MAX_FILE_BYTES) { status = f.name + ' could not be loaded: it is too large to be a preset (over ' + (P.MAX_FILE_BYTES / 1024) + ' KB).'; render('#pe-status'); return; }
     var r = new FileReader();
     r.onload = function () {
       var res = P.fromFile(String(r.result));
@@ -199,7 +214,7 @@
       mine.push(p);
       persist();
       Alpha.settings.notify();
-      status = 'Loaded "' + p.name + '" from ' + f.name + '.';
+      status = 'Loaded "' + p.name + '" from ' + f.name + '.' + (res.warnings.length ? ' Note: ' + res.warnings.join(', ') + '.' : '');
       render('#pe-status');
     };
     r.onerror = function () { status = 'Could not read ' + f.name + '.'; render('#pe-status'); };
@@ -212,19 +227,23 @@
     var act = b.getAttribute('data-act'), row = b.closest('.preset-row'), ds = Alpha.state.ds;
     var p = row ? find(ds, row.getAttribute('data-id')) : null;
     if (act === 'use') { Alpha.settings.useScheme(p.id); status = 'Now using "' + p.name + '".'; render('#pe-status'); }
-    else if (act === 'edit') startEdit(p, p.id);
-    else if (act === 'copy') { var c = JSON.parse(JSON.stringify(p)); c.name = 'Copy of ' + p.name; startEdit(c, null); }
+    else if (act === 'edit') { if (okToDiscard()) startEdit(p, p.id); }
+    else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = uniqueName('Copy of ' + p.name).slice(0, P.MAX_NAME); startEdit(c, null); }
     else if (act === 'download') download(p);
     else if (act === 'delete') {
-      if (!window.confirm('Delete the preset "' + p.name + '"? This cannot be undone (download it first to keep a copy).')) return;
+      var inUse = (Alpha.settings.scheme(ds) || {}).id === p.id;
+      if (!window.confirm('Delete the preset "' + p.name + '"?' + (inUse ? ' It is the preset in use.' : '') +
+        ' This cannot be undone (download it first to keep a copy).')) return;
       mine = mine.filter(function (x) { return x.id !== p.id; });
       persist();
       if (editing && editing.origId === p.id) editing = null;
-      Alpha.settings.notify();
       status = 'Deleted "' + p.name + '".';
+      var fallback = builtIn(ds)[0] || mine[0];
+      if (inUse && fallback) { Alpha.settings.useScheme(fallback.id); status += ' Now using "' + fallback.name + '".'; }
+      else Alpha.settings.notify();
       render('#pe-status');
     }
-    else if (act === 'new') startEdit(blankPreset(), null);
+    else if (act === 'new') { if (okToDiscard()) startEdit(blankPreset(), null); }
     else if (act === 'add-group') {
       var d = editing.draft, used = {};
       d.groups.forEach(function (g) { used[g.baskets.join('+')] = 1; });
@@ -244,7 +263,8 @@
     }
     else if (act === 'save') save(false);
     else if (act === 'save-use') save(true);
-    else if (act === 'cancel') { editing = null; status = ''; render('[data-act="new"]'); }
+    else if (act === 'cancel') { if (!okToDiscard()) return; editing = null; status = ''; render('[data-act="new"]'); }
+    else if (act === 'close') { if (okToDiscard()) { editing = null; dlg.close(); } }
   }
 
   function onInput(e) {
@@ -283,6 +303,10 @@
     dlg.addEventListener('click', onClick);
     dlg.addEventListener('change', onInput);
     dlg.addEventListener('input', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') onInput(e); });
+    dlg.addEventListener('cancel', function (e) {
+      if (!okToDiscard()) { e.preventDefault(); return; }
+      editing = null;
+    });
     dlg.addEventListener('close', function () { editing = null; Alpha.settings.open(); });
   }
 

@@ -222,3 +222,6 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .pe-errors { color: var(--danger-line); font-weight: 600; margin: .4rem 0; padding-left: 1.2rem; }
 .pe-errors:empty { display: none; }
 .pe-buttons { margin-top: .4rem; }
+/* Long labels wrap instead of pushing the layout sideways. */
+.baskets li, .baskets strong, .pg, .preset-name, .preset-groups { overflow-wrap: anywhere; }
+.pg { white-space: normal; }
