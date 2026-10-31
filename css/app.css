@@ -92,7 +92,6 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .baskets { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: .2rem .6rem; list-style: none; margin: 0; padding: 0; font-size: .9rem; }
 .baskets li { display: flex; align-items: center; gap: .25rem; }
 .swatch { display: inline-block; width: 1rem; height: 1rem; border: 1px solid #000; border-radius: 3px; flex: none; }
-.basket-names { white-space: nowrap; }
 
 /* Map and shelf view */
 .map, .elev { flex: 1; min-height: 0; position: relative; }
@@ -225,3 +224,4 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Long labels wrap instead of pushing the layout sideways. */
 .baskets li, .baskets strong, .pg, .preset-name, .preset-groups { overflow-wrap: anywhere; }
 .pg { white-space: normal; }
+.basket-names { overflow-wrap: anywhere; white-space: normal; }

@@ -12,7 +12,8 @@
   'use strict';
 
   var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 2;
-  var MAX_NAME = 60, MAX_LABEL = 40, MAX_FILE_BYTES = 256 * 1024;
+  var MAX_NAME = 60, MAX_LABEL = 40, MAX_COLOUR_NAME = 24, MAX_FILE_BYTES = 256 * 1024;
+  var MIN_COLOUR_DISTANCE = 40; // RGB distance below which two colours look alike
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
 
   // Colours offered in the editor, besides any a preset already uses.
@@ -32,6 +33,13 @@
   function isStr(s) { return typeof s === 'string'; }
   function clean(s) { return isStr(s) ? s.trim() : ''; }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
+  function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
+  function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
+  // A colour called by a standard name ("Black") must look like it.
+  function standard(name) {
+    var n = name.toLowerCase();
+    return COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0] || null;
+  }
 
   // Problems with a preset, as plain sentences. Empty list = valid.
   function check(p) {
@@ -40,17 +48,24 @@
     if (!isStr(p.name) || !clean(p.name)) errors.push('Give the preset a name.');
     else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
 
-    var colours = map(), names = map(), hexes = map();
+    var colours = map(), names = map(), seenHex = [];
     if (!Array.isArray(p.colours)) errors.push('The preset has no colour list.');
     (Array.isArray(p.colours) ? p.colours : []).forEach(function (c) {
-      if (!c || !isStr(c.id) || !clean(c.id) || !isStr(c.name) || !clean(c.name) || !isStr(c.hex) || !/^#[0-9a-f]{6}$/i.test(c.hex)) {
-        errors.push('A colour is missing its id, name or hex code (like #1a1a1a).');
+      if (!c || !isStr(c.id) || !/^[A-Za-z0-9_-]{1,24}$/.test(c.id) || !isStr(c.name) || !clean(c.name) ||
+          !isStr(c.hex) || !/^#[0-9a-f]{6}$/i.test(c.hex)) {
+        errors.push('A colour needs an id (letters, digits, - or _, up to 24), a name and a hex code like #1a1a1a.');
         return;
       }
-      if (colours[c.id]) errors.push('The colour id "' + c.id + '" is listed twice.');
-      // Two colours that look the same, or share a name, cannot tell groups apart.
-      else if (names[c.name.toLowerCase()] || hexes[c.hex.toLowerCase()]) errors.push('The colour "' + c.name + '" looks the same as, or has the same name as, another colour in the preset.');
-      colours[c.id] = c; names[c.name.toLowerCase()] = 1; hexes[c.hex.toLowerCase()] = 1;
+      var name = clean(c.name);
+      if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
+      if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
+      var std = standard(name);
+      if (std && distance(std.hex, c.hex) >= 80) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + name.toLowerCase() + '.');
+      // Two colours that look alike, or share a name, cannot tell groups apart.
+      if (names[name.toLowerCase()]) errors.push('Two colours are called "' + name + '".');
+      var near = seenHex.filter(function (s) { return distance(s.hex, c.hex) < MIN_COLOUR_DISTANCE; })[0];
+      if (near) errors.push('The colours "' + near.name + '" and "' + name + '" look too alike to tell baskets apart.');
+      colours[c.id] = c; names[name.toLowerCase()] = 1; seenHex.push({ hex: c.hex, name: name });
     });
 
     if (!Array.isArray(p.groups)) { errors.push('The preset has no group list.'); return errors; }
@@ -74,7 +89,7 @@
       if (!ok || !b.length) return;
       // What staff see is the colours, so compare by colour, in order.
       var key = b.map(function (id) { return colours[id].hex.toLowerCase(); }).join('+');
-      if (combos[key]) errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return colours[id].name; }).join(' + ') + ').');
+      if (combos[key]) errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return clean(colours[id].name); }).join(' + ') + ').');
       else combos[key] = i + 1;
     });
     return errors;
@@ -122,6 +137,9 @@
     if (errs.length) { out.errors = errs.slice(0, 10).concat(errs.length > 10 ? ['…and ' + (errs.length - 10) + ' more problems.'] : []); return out; }
     p.groups.forEach(function (g, i) { Object.keys(g).forEach(function (k) { if (k !== 'label' && k !== 'baskets') out.warnings.push('ignored "' + k + '" in group ' + (i + 1)); }); });
     var t = tidy({ id: '', name: p.name, colours: p.colours, groups: p.groups });
+    // What is stored must pass the same checks when it is read back.
+    var again = check(t);
+    if (again.length) { out.errors = again.slice(0, 10); return out; }
     if (t.colours.length < p.colours.length) out.warnings.push('dropped ' + (p.colours.length - t.colours.length) + ' unused colour(s)');
     out.preset = t;
     return out;
@@ -129,5 +147,5 @@
 
   return { check: check, tidy: tidy, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
-    MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
+    MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });

@@ -12,9 +12,18 @@
   var broken = [], mine = loadMine(), memoryOnly = false;
   var dlg = null, editing = null, status = '';
 
+  // Set by loadMine(), which runs above this line, so no initial value here.
+  var unreadable; // stored presets that were not a readable list
   function loadMine() {
-    var v = store.get('presets', []), ok = [];
-    (Array.isArray(v) ? v : []).forEach(function (p) { if (p && !P.check(p).length) ok.push(p); else broken.push(p); });
+    var raw = store.raw('presets'), v = null, ok = [];
+    if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
+    if (raw != null && !Array.isArray(v)) {
+      // Keep a copy before anything is saved over it.
+      if (store.raw('presets-unreadable') == null) store.setRaw('presets-unreadable', raw);
+      unreadable = true;
+      return ok;
+    }
+    (v || []).forEach(function (p) { if (p && !P.check(p).length) ok.push(p); else broken.push(p); });
     return ok;
   }
   function persist() { memoryOnly = !store.set('presets', mine.concat(broken)); }
@@ -32,14 +41,14 @@
   // Labels offered in the drop-downs: the data file's list, then labels
   // already used in any preset.
   function labelChoices(ds) {
-    var seen = {}, out = [];
+    var seen = Object.create(null), out = [];
     function add(l) { l = String(l || '').trim(); if (l && !seen[l.toLowerCase()]) { seen[l.toLowerCase()] = 1; out.push(l); } }
     ((ds && ds.groupLabels) || []).forEach(add);
     all(ds).forEach(function (p) { p.groups.forEach(function (g) { add(g.label); }); });
     return out;
   }
   function colourChoices(draft) {
-    var seen = {}, out = [];
+    var seen = Object.create(null), out = [];
     (draft.colours || []).concat(P.COLOUR_CHOICES).forEach(function (c) { if (!seen[c.id]) { seen[c.id] = 1; out.push(c); } });
     return out;
   }
@@ -49,16 +58,20 @@
     while (find(Alpha.state.ds, id)) id = base + '-' + n++;
     return id;
   }
+  // A free name that still fits the length limit.
   function uniqueName(name) {
-    var taken = {}, out = name, n = 2;
+    var taken = Object.create(null), out = name.slice(0, P.MAX_NAME), n = 2;
     all(Alpha.state.ds).forEach(function (p) { taken[p.name.toLowerCase()] = 1; });
-    while (taken[out.toLowerCase()]) out = name + ' (' + n++ + ')';
+    while (taken[out.toLowerCase()]) {
+      var suffix = ' (' + n++ + ')';
+      out = name.slice(0, P.MAX_NAME - suffix.length).trim() + suffix;
+    }
     return out;
   }
 
   /* ---------- drawing ---------- */
   function swatches(p, g) {
-    var byId = {};
+    var byId = Object.create(null);
     p.colours.forEach(function (c) { byId[c.id] = c; });
     return g.baskets.map(function (b) {
       var c = byId[b] || { name: b, hex: '#ffffff' };
@@ -115,7 +128,7 @@
         return '<tr><td>' + (i + 1) + '</td><td>' + labelCell(i, g, choices) + '</td><td>' + basketCell(i, 0, g.baskets[0], colours) + '</td>' +
           '<td>' + basketCell(i, 1, g.baskets[1] || '', colours) + '</td>' +
           '<td><button type="button" class="btn small" data-act="remove-group" data-i="' + i + '" aria-label="Remove group ' + (i + 1) + '"' +
-          (d.groups.length <= P.MIN_GROUPS ? ' disabled' : '') + '>Remove</button></td></tr>';
+          (d.groups.length <= P.MIN_GROUPS ? ' disabled title="A preset needs at least ' + P.MIN_GROUPS + ' groups"' : '') + '>Remove</button></td></tr>';
       }).join('') + '</tbody></table>' +
       '<button type="button" class="btn small" data-act="add-group"' + (d.groups.length >= P.MAX_GROUPS ? ' disabled' : '') + '>Add a group</button>' +
       '<ul id="pe-errors" class="pe-errors" role="alert"></ul>' +
@@ -130,6 +143,7 @@
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
       (broken.length ? '<p class="note-bad small">' + broken.length + ' saved preset(s) could not be read and are kept unchanged in this browser\'s storage.</p>' : '') +
+      (unreadable ? '<p class="note-bad small">The saved presets in this browser could not be read. A copy of them was kept (storage key alpha.presets-unreadable).</p>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +

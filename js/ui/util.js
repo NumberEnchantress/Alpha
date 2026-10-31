@@ -17,7 +17,10 @@
     set: function (key, value) {
       try { window.localStorage.setItem('alpha.' + key, JSON.stringify(value)); return true; } catch (e) { return false; }
     },
-    remove: function (key) { try { window.localStorage.removeItem('alpha.' + key); } catch (e) { /* ignore */ } }
+    remove: function (key) { try { window.localStorage.removeItem('alpha.' + key); } catch (e) { /* ignore */ } },
+    // The stored text as is (null if none or storage is blocked).
+    raw: function (key) { try { return window.localStorage.getItem('alpha.' + key); } catch (e) { return null; } },
+    setRaw: function (key, text) { try { window.localStorage.setItem('alpha.' + key, text); return true; } catch (e) { return false; } }
   };
 
   var SVGNS = 'http://www.w3.org/2000/svg';
