@@ -23,16 +23,22 @@
     return ids;
   }
 
+  function builtInNames() {
+    var ds = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample)) || {};
+    return (ds.basketSchemes || []).map(function (p) { return P.clean(p.name).toLowerCase(); });
+  }
+
   function loadMine() {
     var ok = [], bad = [], names = Object.create(null), builtins = builtInIds();
+    builtInNames().forEach(function (n) { names[n] = 1; });
     if (memoryOnly) return; // storage is blocked: keep what is in memory
     migrateOldList();
     store.keys(KEY).forEach(function (k) {
       var id = k.slice(KEY.length), raw = store.raw(k), p = null;
       try { p = JSON.parse(raw); } catch (e) { p = null; }
       var valid = p && typeof p === 'object' && p.id === id && ID_RE.test(id) && !builtins[id] &&
-        !P.check(p).length && !names[String(p.name).toLowerCase()];
-      if (valid) { names[p.name.toLowerCase()] = 1; ok.push(p); } else bad.push(k);
+        !P.check(p).length && !names[P.clean(p.name).toLowerCase()];
+      if (valid) { names[P.clean(p.name).toLowerCase()] = 1; ok.push(p); } else bad.push(k);
     });
     mine = ok; broken = bad;
   }
@@ -50,12 +56,19 @@
     store.setRaw('presets-migrated', '1');
   }
 
+  // Returns false when the browser would not store it (for example, full).
   function saveOne(p) {
-    if (!memoryOnly && !store.set(KEY + p.id, p)) memoryOnly = true;
-    if (!memoryOnly) loadMine(); else mine = mine.filter(function (x) { return x.id !== p.id; }).concat([p]);
+    if (memoryOnly) { mine = mine.filter(function (x) { return x.id !== p.id; }).concat([p]); return true; }
+    var ok = store.set(KEY + p.id, p);
+    loadMine();
+    return ok;
   }
   function removeOne(id) {
-    if (!memoryOnly) { store.remove(KEY + id); loadMine(); } else mine = mine.filter(function (x) { return x.id !== id; });
+    if (memoryOnly) { mine = mine.filter(function (x) { return x.id !== id; }); return true; }
+    store.remove(KEY + id);
+    var gone = store.raw(KEY + id) == null;
+    loadMine();
+    return gone;
   }
 
   // Storage blocked altogether? Then presets live in memory for this page.
@@ -96,8 +109,8 @@
   // A free name that still fits the length limit.
   function uniqueName(name) {
     var taken = Object.create(null), out = name.slice(0, P.MAX_NAME), n = 2;
-    all(Alpha.state.ds).forEach(function (p) { taken[p.name.toLowerCase()] = 1; });
-    while (taken[out.toLowerCase()]) {
+    all(Alpha.state.ds).forEach(function (p) { taken[P.clean(p.name).toLowerCase()] = 1; });
+    while (taken[P.clean(out).toLowerCase()]) {
       var suffix = ' (' + n++ + ')';
       out = name.slice(0, P.MAX_NAME - suffix.length).trim() + suffix;
     }
@@ -177,7 +190,11 @@
     dlg.innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
-      (broken.length ? '<p class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage (' + broken.map(function (k) { return esc('alpha.' + k); }).join(', ') + ').</p>' : '') +
+      (broken.length ? '<div class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage:<ul class="broken-list">' +
+        broken.map(function (k) {
+          return '<li>' + esc('alpha.' + k) + ' <button type="button" class="btn small" data-act="broken-dl" data-key="' + esc(k) + '">Download as is</button> ' +
+            '<button type="button" class="btn small" data-act="broken-rm" data-key="' + esc(k) + '">Remove</button></li>';
+        }).join('') + '</ul></div>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
@@ -189,9 +206,10 @@
     if (f) f.focus();
   }
 
+  // Names are compared as they will be stored (spacing tidied, any case).
   function nameTaken(name, exceptId) {
-    var n = String(name || '').trim().toLowerCase();
-    return all(Alpha.state.ds).some(function (p) { return p.id !== exceptId && p.name.toLowerCase() === n; });
+    var n = P.clean(name).toLowerCase();
+    return all(Alpha.state.ds).some(function (p) { return p.id !== exceptId && P.clean(p.name).toLowerCase() === n; });
   }
   // Colours offered but not used by any group do not count.
   function inUse(d) {
@@ -232,11 +250,15 @@
     if (showErrors().length) { dlg.querySelector('#pe-errors').scrollIntoView({ block: 'nearest' }); return; }
     var t = P.tidy(editing.draft);
     if (editing.origId) {
+      // Deleted in another window while being edited? Ask before bringing it back.
+      if (!memoryOnly && store.raw(KEY + editing.origId) == null &&
+          !window.confirm('This preset was deleted in another window. Save it again?')) return;
       t.id = editing.origId;
-      saveOne(t);
-    } else {
-      t.id = uniqueId(t.name);
-      saveOne(t);
+    } else t.id = uniqueId(t.name);
+    if (!saveOne(t)) {
+      status = 'Not saved: this browser would not store the preset (its storage may be full). Download it to keep it.';
+      var st = dlg.querySelector('#pe-status'); st.textContent = status; st.focus();
+      return;
     }
     editing = null;
     status = 'Saved "' + t.name + '".';
@@ -264,7 +286,7 @@
       var p = res.preset;
       p.name = uniqueName(p.name);
       p.id = uniqueId(p.name);
-      saveOne(p);
+      if (!saveOne(p)) { status = f.name + ' was read but not saved: this browser would not store it (its storage may be full).'; render('#pe-status'); return; }
       Alpha.settings.notify();
       status = 'Loaded "' + p.name + '" from ' + f.name + '.' + (res.warnings.length ? ' Note: ' + res.warnings.join(', ') + '.' : '');
       render('#pe-status');
@@ -282,11 +304,26 @@
     else if (act === 'edit') { if (okToDiscard()) startEdit(p, p.id); }
     else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = uniqueName('Copy of ' + p.name).slice(0, P.MAX_NAME); startEdit(c, null); }
     else if (act === 'download') download(p);
+    else if (act === 'broken-dl' || act === 'broken-rm') {
+      var key = b.getAttribute('data-key'), raw = store.raw(key);
+      if (act === 'broken-dl') {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([raw == null ? '' : raw], { type: 'application/json' }));
+        a.download = 'unreadable-' + key.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        return;
+      }
+      if (!window.confirm('Remove the unreadable entry alpha.' + key + '? This cannot be undone (download it first to keep a copy).')) return;
+      store.remove(key);
+      loadMine();
+      status = 'Removed alpha.' + key + '.';
+      render('#pe-status');
+    }
     else if (act === 'delete') {
       var inUse = (Alpha.settings.scheme(ds) || {}).id === p.id;
       if (!window.confirm('Delete the preset "' + p.name + '"?' + (inUse ? ' It is the preset in use.' : '') +
         ' This cannot be undone (download it first to keep a copy).')) return;
-      removeOne(p.id);
+      if (!removeOne(p.id)) { status = '"' + p.name + '" could not be deleted from this browser\'s storage.'; render('#pe-status'); return; }
       if (editing && editing.origId === p.id) editing = null;
       status = 'Deleted "' + p.name + '".';
       var fallback = builtIn(ds)[0] || mine[0];

@@ -34,6 +34,10 @@
   // Runs of spaces, tabs and zero-width characters look like one space on screen.
   function clean(s) { return isStr(s) ? s.replace(/[\s\u200B-\u200D\uFEFF]+/g, ' ').trim() : ''; }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
+  // Invisible format characters (zero-width, soft hyphen, direction marks
+  // and overrides) can make different text look the same, so they are refused.
+  var INVISIBLE = /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿ﾠ]/;
+  function invisible(s) { return isStr(s) && INVISIBLE.test(s); }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
   function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
   function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE; }
@@ -47,7 +51,8 @@
   function check(p) {
     var errors = [];
     if (!p || typeof p !== 'object' || Array.isArray(p)) return ['Not a preset.'];
-    if (!isStr(p.name) || !clean(p.name)) errors.push('Give the preset a name.');
+    if (invisible(p.name)) errors.push('The name contains invisible characters; type it again.');
+    else if (!isStr(p.name) || !clean(p.name)) errors.push('Give the preset a name.');
     else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
 
     var colours = map(), names = map(), seenHex = [];
@@ -59,6 +64,7 @@
         return;
       }
       var name = clean(c.name);
+      if (invisible(c.name)) { errors.push('A colour name contains invisible characters.'); return; }
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       var std = standard(name);
@@ -79,7 +85,8 @@
       var n = 'Group ' + (i + 1);
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
       var label = clean(g.label);
-      if (!isStr(g.label) || !label) errors.push(n + ' needs a label.');
+      if (invisible(g.label)) errors.push(n + ': the label contains invisible characters; type it again.');
+      else if (!isStr(g.label) || !label) errors.push(n + ' needs a label.');
       else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
       else if (labels[label.toLowerCase()]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[label.toLowerCase()] + '.');
       else labels[label.toLowerCase()] = i + 1;
@@ -147,7 +154,7 @@
     return out;
   }
 
-  return { check: check, tidy: tidy, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
+  return { check: check, tidy: tidy, clean: clean, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
     MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });
