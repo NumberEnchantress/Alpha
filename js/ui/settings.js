@@ -1,4 +1,4 @@
-/* Settings: basket scheme, text size, which rules are on, and rules the
+/* Settings: basket preset, text size, which rules are on, and rules the
    user adds here. Saved in localStorage when the browser allows it;
    otherwise they last until the page is closed. */
 (function (Alpha) {
@@ -27,11 +27,13 @@
   saved = store.set('probe', 1); // false when the browser blocks storage
   function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); }
 
+  // The basket preset in use: built-in (data file) or the user's own.
   function scheme(ds) {
-    var list = (ds && ds.basketSchemes) || [];
+    var list = Alpha.presetsUI ? Alpha.presetsUI.all(ds) : ((ds && ds.basketSchemes) || []);
     for (var i = 0; i < list.length; i++) if (list[i].id === prefs.scheme) return list[i];
     return list[0] || null;
   }
+  function useScheme(id) { prefs.scheme = id; save(); changed(); }
   function disabledRules() { return prefs.disabled; }
   function customRules() { return prefs.custom; }
 
@@ -58,10 +60,13 @@
     var h = '<h2 id="settings-title">Settings</h2>';
     if (!saved) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
 
-    h += '<fieldset><legend>Basket colours</legend>' + (ds.basketSchemes || []).map(function (s) {
+    var builtIns = {};
+    (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });
+    h += '<fieldset><legend>Basket preset</legend>' + Alpha.presetsUI.all(ds).map(function (s) {
       return '<label class="opt"><input type="radio" name="scheme" value="' + esc(s.id) + '"' + (cur && cur.id === s.id ? ' checked' : '') + '> ' +
-        esc(s.name) + ' <span class="muted">(' + s.groups.length + ' groups)</span></label>';
-    }).join('') + '<p class="muted small">Which group a script belongs to is not decided by Alpha yet (open question 1 in NOTES.md).</p></fieldset>';
+        esc(s.name) + ' <span class="muted">(' + s.groups.length + ' groups' + (builtIns[s.id] ? '' : ', yours') + ')</span></label>';
+    }).join('') + '<p class="muted small">The preset sets the groups a script can be in and the baskets for each.</p>' +
+      '<button type="button" class="btn" id="open-presets">Edit basket presets…</button></fieldset>';
 
     h += '<fieldset><legend>Text size</legend>' + SCALES.map(function (s) {
       return '<label class="opt inline"><input type="radio" name="scale" value="' + s[0] + '"' + (prefs.scale === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>';
@@ -147,12 +152,14 @@
       save(); changed(); build();
       var first = dlg.querySelector('input'); if (first) first.focus();
     } else if (e.target.id === 'nr-add') addRule();
+    else if (e.target.id === 'open-presets') { dlg.close(); Alpha.presetsUI.open(); }
   }
 
   function open() { build(); dlg.showModal(); var c = dlg.querySelector('input:checked') || dlg.querySelector('input'); if (c) c.focus(); }
 
   function init(h) {
     hooks = h || {};
+    Alpha.presetsUI.init();
     dlg = document.getElementById('settings');
     dlg.addEventListener('change', onDialogEvent);
     dlg.addEventListener('click', onDialogClick);
@@ -163,7 +170,7 @@
   load();
   applyScale();
   Alpha.settings = {
-    init: init, open: open, scheme: scheme, disabledRules: disabledRules, customRules: customRules,
+    init: init, open: open, scheme: scheme, useScheme: useScheme, notify: changed, disabledRules: disabledRules, customRules: customRules,
     importedDataset: function () { return Alpha.importer ? Alpha.importer.dataset() : null; },
     reload: function () { if (hooks.reload) hooks.reload(); }
   };

@@ -43,7 +43,6 @@
   function doImport(el) {
     var status = el.querySelector('#imp-status');
     var prodIn = el.querySelector('#imp-products'), robotIn = el.querySelector('#imp-robot');
-    var preferred = el.querySelector('#imp-preferred').checked;
     status.textContent = 'Reading…';
     Promise.all([readFile(prodIn), readFile(robotIn)]).then(function (files) {
       var pf = files[0], rf = files[1];
@@ -57,7 +56,7 @@
         // Robot list only: apply it to a copy of the products in use now.
         products = JSON.parse(JSON.stringify(cur.products));
       }
-      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: preferred, lineOf: lineOf }); report.robotFile = rf.name; }
+      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf }); report.robotFile = rf.name; }
       var source = [pf && pf.name, rf && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: !pf && !!cur.meta.sample });
       report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
@@ -134,7 +133,7 @@
       '<div class="import-form">' +
       '<label>Products / shelf CSV <input type="file" id="imp-products" accept=".csv,text/csv,text/plain"></label>' +
       '<label>Robot NDC list CSV <input type="file" id="imp-robot" accept=".csv,text/csv,text/plain"></label>' +
-      '<label class="opt"><input type="checkbox" id="imp-preferred" checked> NDCs in the robot list are the preferred ones (assumption 4 in NOTES.md)</label>' +
+      '<p class="small muted">NDCs in the robot list are marked as the preferred ones.</p>' +
       '<div><button type="button" class="btn" id="imp-go">Import</button> ' +
       // Only imported data can be downloaded, so the fictional sample is never saved as store data.
       (s ? '<button type="button" class="btn" id="imp-stop">Stop using imported data</button> ' +

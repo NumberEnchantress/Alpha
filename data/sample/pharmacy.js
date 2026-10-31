@@ -750,6 +750,7 @@
   {"id":"six-pairs","name":"6 pairs (two different colours)","colours":[{"id":"black","name":"Black","hex":"#1a1a1a"},{"id":"yellow","name":"Yellow","hex":"#f2c500"},{"id":"blue","name":"Blue","hex":"#1f5fd1"}],"groups":[{"label":"1","baskets":["black","yellow"]},{"label":"2","baskets":["black","blue"]},{"label":"3","baskets":["yellow","black"]},{"label":"4","baskets":["yellow","blue"]},{"label":"5","baskets":["blue","black"]},{"label":"6","baskets":["blue","yellow"]}]},
   {"id":"three-colours","name":"3 colours (1 basket)","colours":[{"id":"black","name":"Black","hex":"#1a1a1a"},{"id":"yellow","name":"Yellow","hex":"#f2c500"},{"id":"blue","name":"Blue","hex":"#1f5fd1"}],"groups":[{"label":"1","baskets":["black"]},{"label":"2","baskets":["yellow"]},{"label":"3","baskets":["blue"]}]}
  ],
+ "groupLabels": ["Waiting","Coming back today","Tomorrow","Delivery","Mail","Drive-through","Fridge","On hold","Priority"],
  "products": [
   {"ndc":"99999013290","drug":"acyclovir","strength":"400 mg","form":"tablet","manufacturer":"Nullmed (sample)","countPerBottle":1000,"location":"060","niosh":false,"safetyCap":true,"vialCapacity":{"20":30,"40":60,"60":90},"robot":false,"preferred":true,"rank":1},
   {"ndc":"99999015150","drug":"acyclovir","strength":"400 mg","form":"tablet","manufacturer":"Fictive Labs (sample)","countPerBottle":90,"location":"060","niosh":false,"safetyCap":true,"vialCapacity":{"20":30,"40":60,"60":90},"robot":false,"preferred":false,"rank":2,"shelf":2},
