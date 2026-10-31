@@ -39,6 +39,8 @@
   // A line that starts like an NDC: inside a quoted field it means another record was swallowed.
   var NDC_START = /^\s*"?(\d{4,5}-\d{3,4}-\d{1,2}|\d{10,12})\b/;
   var BAD_QUOTE = 'a quote on this line is not closed or is misplaced, so the line could not be read; it was skipped and reading went on with the next line';
+  var MERGED = 'a quoted field here runs onto the following lines in a way that does not fit the columns, so the line could not be read; it was skipped and reading went on with the next line';
+  var NDC_ANY = /\d{4,5}-\d{3,4}-\d{1,2}|\d{11}/g;
 
   function key(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -72,19 +74,23 @@
       var sub = t.slice(base), prev = 0, l = line, restartAt = -1;
       Papa.parse(sub, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
         var cur = r.meta.cursor, cells = r.data;
+        var lineEnd = sub.indexOf('\n', prev);
+        // Trailing blank cells beyond the first row's count do not change the count.
+        var count = cells.length;
+        while (expected != null && count > expected && !String(cells[count - 1]).trim()) count--;
         // A field with a line break is a merged record when a later line in
         // it has the delimiter or starts like an NDC, when the file has one
         // column (robot lists), or when the row's field count differs from
         // the first row's.
         var multi = cells.some(function (c) { return String(c).indexOf('\n') >= 0; });
-        var merged = multi && (expected === 1 || (expected != null && cells.length !== expected) || cells.some(function (c) {
+        var merged = multi && (expected === 1 || (expected != null && count !== expected) || cells.some(function (c) {
           var parts = String(c).split('\n');
           return parts.length > 1 && parts.slice(1).some(function (s) { return s.indexOf(delim) >= 0 || NDC_START.test(s); });
         }));
-        if (merged || (r.errors || []).some(function (e) { return e.type === 'Quotes'; })) {
-          out.push({ cells: cells, line: l, endLine: l, badQuote: true });
-          var j = sub.indexOf('\n', prev);
-          restartAt = j < 0 ? sub.length : j + 1;
+        var quoteErr = (r.errors || []).some(function (e) { return e.type === 'Quotes'; });
+        if (merged || quoteErr) {
+          out.push({ cells: cells, line: l, endLine: l, badQuote: true, why: quoteErr ? BAD_QUOTE : MERGED });
+          restartAt = lineEnd < 0 ? sub.length : lineEnd + 1;
           parser.abort();
           return;
         }
@@ -111,7 +117,7 @@
     var rows = l.rows.map(function (r) {
       var o = {};
       fields.forEach(function (f, i) { if (!(f in o)) o[f] = r.cells[i]; });
-      return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, badQuote: r.badQuote, cells: r.cells };
+      return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, badQuote: r.badQuote, why: r.why, cells: r.cells };
     });
     return { rows: rows, fields: fields, empty: l.empty, headBad: !!(head && (head.badQuote || head.endLine > head.line)), headLine: head ? head.line : 1 };
   }
@@ -147,7 +153,7 @@
 
   // "ATORVASTATIN 40 MG TAB" -> drug, strength, form; only when there is no
   // strength column and the text clearly has a number with a unit.
-  var DESC = /^(.*?[a-z].*?)\s+(\d[\d.,/-]*\s*(?:mg|mcg|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose))?)\b\s*(.*)$/i;
+  var DESC = /^(.*?[a-z].*?)\s+(\d[\d.,/-]*\s*(?:mg|mcg|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose))?)(?![a-z0-9])\s*(.*)$/i;
 
   // Why a value is not a usable NDC, in words.
   function whyBadNdc(raw) {
@@ -184,6 +190,7 @@
     var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], problem: null,
       columns: { used: m, unused: cols.unused, missing: [] } };
     var products = [], seen = {}, lineOf = {};
+    var inBad = {}; // NDCs seen inside unreadable records -> line of that record
     if (p.empty) { report.problem = 'The file is empty.'; return { products: products, lineOf: lineOf, report: report }; }
     if (p.headBad) {
       report.problem = 'The header (line ' + p.headLine + ') has a quote problem or runs over several lines, so the columns cannot be known. Fix that line and import again.';
@@ -204,7 +211,8 @@
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       if (row.badQuote) {
         var first = String(row.cells[p.fields.indexOf(m.ndc)] || '').split('\n')[0].trim().slice(0, 20);
-        report.skipped.push({ row: line, ndc: first, reason: BAD_QUOTE });
+        report.skipped.push({ row: line, ndc: first, reason: row.why || BAD_QUOTE });
+        (row.cells.join(' ').match(NDC_ANY) || []).forEach(function (x) { var k = ndc.normalize(x); if (k && !inBad[k]) inBad[k] = line; });
         return;
       }
       if (row.endLine > line) note('this row runs over lines ' + line + '-' + row.endLine + ' (a quoted field with line breaks); check nothing was merged');
@@ -223,6 +231,9 @@
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       seen[n] = line; lineOf[n] = line;
+      // It cannot be told whether this is a real row or the rest of an
+      // unreadable record above it, so it is imported with a warning.
+      if (inBad[n] && inBad[n] < line) note('this NDC also appears inside line ' + inBad[n] + ', which could not be read; check this line is a complete record and not the end of that one');
 
       var prod = { ndc: n, drug: drug };
       var strength = get('strength'), form = get('form');
@@ -334,7 +345,7 @@
     var seen = {};
     for (var i = start; i < rows.length; i++) {
       var line = rows[i].line;
-      if (rows[i].badQuote) { report.skipped.push({ row: line, ndc: String(rows[i].cells[col] || '').split('\n')[0].trim().slice(0, 20), reason: BAD_QUOTE }); continue; }
+      if (rows[i].badQuote) { report.skipped.push({ row: line, ndc: String(rows[i].cells[col] || '').split('\n')[0].trim().slice(0, 20), reason: rows[i].why || BAD_QUOTE }); continue; }
       var raw = String(rows[i].cells[col] || '').trim(), n = ndc.normalize(raw);
       if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
