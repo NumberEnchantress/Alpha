@@ -18,14 +18,17 @@
   function dataset() {
     var s = saved(), b = base();
     if (!s || !b || !Array.isArray(s.products)) return null;
-    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source, { productsAreSample: !!s.productsAreSample });
+    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source, { productsAreSample: !!s.productsAreSample, robotPrior: s.robotPrior });
     ds.meta.importedAt = s.when;
     return ds;
   }
 
   function keep(state) {
     memory = null;
-    if (!store.set('imported', state)) memory = state; // blocked or too big: keep for this session
+    if (!store.set('imported', state)) {
+      memory = state; // blocked or too big: keep for this session
+      store.remove('imported'); // and never let an older saved import come back after a reload
+    }
     return !memory;
   }
 
@@ -73,7 +76,7 @@
       // undoing the robot list applied before (a new list replaces the old one).
       products = JSON.parse(JSON.stringify(prev && Array.isArray(prev.products) ? prev.products : cur.products));
       if (prev) { Alpha.importcsv.restoreRobot(products, prev.robotPrior); lineOf = prev.lineOf || null; productsSource = prev.productsSource || null; productsAreSample = !!prev.productsAreSample; }
-      else productsAreSample = !!cur.meta.sample;
+      else { Alpha.importcsv.restoreRobot(products, cur.meta.robotPrior); productsAreSample = !!cur.meta.sample; } // store.js keeps what its robot list changed
     }
     var productsOk = !pf || (!report.products.fatal && report.products.imported > 0);
     if (rf && productsOk) {
@@ -82,7 +85,9 @@
       if (!report.robot.fatal) robotPrior = report.robot.prior;
     } else if (rf) report.robotNotUsed = rf.name + ' was not used, because the products file was not imported.';
     var robotOk = !rf || (report.robot && !report.robot.fatal);
-    var changed = pf ? productsOk : robotOk;
+    // All or nothing: if either file was refused, neither is used.
+    var changed = productsOk && robotOk;
+    if (pf && rf && productsOk && !robotOk) report.robotNotUsed = 'Neither file was used, because ' + rf.name + ' was refused; ' + pf.name + ' was read but not applied.';
     if (changed) {
       var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
@@ -108,6 +113,7 @@
     var ds = Alpha.state.ds;
     var out = JSON.parse(JSON.stringify(ds));
     out.meta = { id: 'real', name: 'Store data' + (ds.meta.source ? ' from ' + ds.meta.source : ''), sample: !!ds.meta.sample, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
+    if (ds.meta.robotPrior) out.meta.robotPrior = ds.meta.robotPrior; // so a later robot list can replace this one
     var text = '/* Store data for Alpha. PRIVATE: keep it out of any public repository. */\n' +
       '(window.ALPHA_DATASETS = window.ALPHA_DATASETS || {}).real = ' + JSON.stringify(out) + ';\n';
     var a = document.createElement('a');
@@ -163,7 +169,8 @@
 
   function reportHtml(rep) {
     if (!rep) return '';
-    var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>';
+    var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>' +
+      (rep.robotNotUsed ? '<p class="note-bad" data-testid="not-applied">' + esc(rep.robotNotUsed) + '</p>' : '');
     if (rep.products) {
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
@@ -182,7 +189,6 @@
         h += '<h4>Imported, with notes</h4>' + table(p.notes, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
       }
     }
-    if (rep.robotNotUsed) h += '<p class="note-bad">' + esc(rep.robotNotUsed) + '</p>';
     if (rep.robot) {
       var r = rep.robot;
       if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
