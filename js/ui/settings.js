@@ -171,6 +171,13 @@
     dlg.addEventListener('click', onDialogClick);
     dlg.addEventListener('close', function () { document.getElementById('q').focus(); });
     document.getElementById('settings-btn').addEventListener('click', open);
+    // Settings changed in another window: take them, so an older window does
+    // not later save its stale copy over them.
+    window.addEventListener('storage', function (e) {
+      if (e.key !== 'alpha.prefs') return;
+      load(); changed();
+      if (dlg.open) build();
+    });
   }
 
   load();

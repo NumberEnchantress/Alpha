@@ -7,26 +7,59 @@
   var ui = Alpha.ui, esc = ui.esc, store = ui.store, P = Alpha.presets;
   var OWN = '__own__', NONE = '';
 
-  // Stored presets that fail the checks are kept as they are (never dropped),
-  // and the page says so.
-  var broken = [], mine = loadMine(), memoryOnly = false;
+  /* Storage: each preset is its own entry, "alpha.preset.<id>". Saving or
+     deleting one never rewrites the others, so two open windows cannot erase
+     each other's presets, and an entry that fails the checks is never
+     written over: it is listed as unreadable and left as it is. Windows
+     reload the list when another window changes it (the storage event). */
+  var KEY = 'preset.', ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  var mine = [], broken = [], memoryOnly = false;
   var dlg = null, editing = null, status = '';
 
-  // Set by loadMine(), which runs above this line, so no initial value here.
-  var unreadable; // stored presets that were not a readable list
-  function loadMine() {
-    var raw = store.raw('presets'), v = null, ok = [];
-    if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
-    if (raw != null && !Array.isArray(v)) {
-      // Keep a copy before anything is saved over it.
-      if (store.raw('presets-unreadable') == null) store.setRaw('presets-unreadable', raw);
-      unreadable = true;
-      return ok;
-    }
-    (v || []).forEach(function (p) { if (p && !P.check(p).length) ok.push(p); else broken.push(p); });
-    return ok;
+  function builtInIds() {
+    var ids = Object.create(null);
+    (((Alpha.state && Alpha.state.ds) || window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample) || {}).basketSchemes || [])
+      .forEach(function (p) { ids[p.id] = 1; });
+    return ids;
   }
-  function persist() { memoryOnly = !store.set('presets', mine.concat(broken)); }
+
+  function loadMine() {
+    var ok = [], bad = [], names = Object.create(null), builtins = builtInIds();
+    if (memoryOnly) return; // storage is blocked: keep what is in memory
+    migrateOldList();
+    store.keys(KEY).forEach(function (k) {
+      var id = k.slice(KEY.length), raw = store.raw(k), p = null;
+      try { p = JSON.parse(raw); } catch (e) { p = null; }
+      var valid = p && typeof p === 'object' && p.id === id && ID_RE.test(id) && !builtins[id] &&
+        !P.check(p).length && !names[String(p.name).toLowerCase()];
+      if (valid) { names[p.name.toLowerCase()] = 1; ok.push(p); } else bad.push(k);
+    });
+    mine = ok; broken = bad;
+  }
+
+  // Version-14 to 16 kept all presets in one list under "alpha.presets".
+  // Copy readable ones to their own entries once; the old list is left as is.
+  function migrateOldList() {
+    if (store.raw('presets-migrated') != null) return;
+    var raw = store.raw('presets'), v = null;
+    if (raw == null) return;
+    try { v = JSON.parse(raw); } catch (e) { v = null; }
+    (Array.isArray(v) ? v : []).forEach(function (p) {
+      if (p && typeof p.id === 'string' && ID_RE.test(p.id) && store.raw(KEY + p.id) == null) store.set(KEY + p.id, p);
+    });
+    store.setRaw('presets-migrated', '1');
+  }
+
+  function saveOne(p) {
+    if (!memoryOnly && !store.set(KEY + p.id, p)) memoryOnly = true;
+    if (!memoryOnly) loadMine(); else mine = mine.filter(function (x) { return x.id !== p.id; }).concat([p]);
+  }
+  function removeOne(id) {
+    if (!memoryOnly) { store.remove(KEY + id); loadMine(); } else mine = mine.filter(function (x) { return x.id !== id; });
+  }
+
+  // Storage blocked altogether? Then presets live in memory for this page.
+  (function () { if (!store.set('probe', 1)) memoryOnly = true; })();
 
   // Unsaved changes in the editor?
   function dirty() { return !!editing && JSON.stringify(strip(editing.draft)) !== editing.start; }
@@ -34,7 +67,9 @@
   function okToDiscard() { return !dirty() || window.confirm('Discard the changes to this preset?'); }
 
   function builtIn(ds) { return (ds && ds.basketSchemes) || []; }
-  function all(ds) { return builtIn(ds).concat(mine); }
+  // The list is read on first use: the app asks for it while loading, before init().
+  var loaded = false;
+  function all(ds) { if (!loaded) { loaded = true; loadMine(); } return builtIn(ds).concat(mine); }
   function isMine(id) { return mine.some(function (p) { return p.id === id; }); }
   function find(ds, id) { return all(ds).filter(function (p) { return p.id === id; })[0] || null; }
 
@@ -55,7 +90,7 @@
 
   function uniqueId(name) {
     var base = 'user-' + P.slug(name), id = base, n = 2;
-    while (find(Alpha.state.ds, id)) id = base + '-' + n++;
+    while (find(Alpha.state.ds, id) || broken.indexOf(KEY + id) >= 0) id = base + '-' + n++;
     return id;
   }
   // A free name that still fits the length limit.
@@ -101,7 +136,7 @@
   function labelCell(i, g, choices) {
     var known = choices.some(function (c) { return c === g.label; }), own = g.own || (!!g.label && !known);
     var opts = '<option value="">Choose a label…</option>' + choices.map(function (c) {
-      return '<option' + (!own && c === g.label ? ' selected' : '') + '>' + esc(c) + '</option>';
+      return '<option value="' + esc(c) + '"' + (!own && c === g.label ? ' selected' : '') + '>' + esc(c) + '</option>';
     }).join('') + '<option value="' + OWN + '"' + (own ? ' selected' : '') + '>Type your own…</option>';
     return '<select id="pl-' + i + '" data-i="' + i + '" data-f="label" aria-label="Group ' + (i + 1) + ' label">' + opts + '</select>' +
       '<input type="text" id="po-' + i + '" data-i="' + i + '" data-f="own" class="own-label" aria-label="Group ' + (i + 1) + ' label, typed"' +
@@ -142,8 +177,7 @@
     dlg.innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
-      (broken.length ? '<p class="note-bad small">' + broken.length + ' saved preset(s) could not be read and are kept unchanged in this browser\'s storage.</p>' : '') +
-      (unreadable ? '<p class="note-bad small">The saved presets in this browser could not be read. A copy of them was kept (storage key alpha.presets-unreadable).</p>' : '') +
+      (broken.length ? '<p class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage (' + broken.map(function (k) { return esc('alpha.' + k); }).join(', ') + ').</p>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
@@ -159,8 +193,14 @@
     var n = String(name || '').trim().toLowerCase();
     return all(Alpha.state.ds).some(function (p) { return p.id !== exceptId && p.name.toLowerCase() === n; });
   }
+  // Colours offered but not used by any group do not count.
+  function inUse(d) {
+    var used = Object.create(null);
+    d.groups.forEach(function (g) { g.baskets.forEach(function (b) { used[b] = 1; }); });
+    return { name: d.name, colours: d.colours.filter(function (c) { return used[c.id]; }), groups: d.groups };
+  }
   function showErrors() {
-    var errs = P.check(editing.draft), el = dlg.querySelector('#pe-errors');
+    var errs = P.check(inUse(editing.draft)), el = dlg.querySelector('#pe-errors');
     if (nameTaken(editing.draft.name, editing.origId)) errs.unshift('Another preset already has this name.');
     el.innerHTML = errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('');
     return errs;
@@ -193,12 +233,11 @@
     var t = P.tidy(editing.draft);
     if (editing.origId) {
       t.id = editing.origId;
-      mine = mine.map(function (p) { return p.id === t.id ? t : p; });
+      saveOne(t);
     } else {
       t.id = uniqueId(t.name);
-      mine.push(t);
+      saveOne(t);
     }
-    persist();
     editing = null;
     status = 'Saved "' + t.name + '".';
     if (andUse) Alpha.settings.useScheme(t.id); else Alpha.settings.notify();
@@ -225,8 +264,7 @@
       var p = res.preset;
       p.name = uniqueName(p.name);
       p.id = uniqueId(p.name);
-      mine.push(p);
-      persist();
+      saveOne(p);
       Alpha.settings.notify();
       status = 'Loaded "' + p.name + '" from ' + f.name + '.' + (res.warnings.length ? ' Note: ' + res.warnings.join(', ') + '.' : '');
       render('#pe-status');
@@ -248,8 +286,7 @@
       var inUse = (Alpha.settings.scheme(ds) || {}).id === p.id;
       if (!window.confirm('Delete the preset "' + p.name + '"?' + (inUse ? ' It is the preset in use.' : '') +
         ' This cannot be undone (download it first to keep a copy).')) return;
-      mine = mine.filter(function (x) { return x.id !== p.id; });
-      persist();
+      removeOne(p.id);
       if (editing && editing.origId === p.id) editing = null;
       status = 'Deleted "' + p.name + '".';
       var fallback = builtIn(ds)[0] || mine[0];
@@ -262,7 +299,10 @@
       var d = editing.draft, used = {};
       d.groups.forEach(function (g) { used[g.baskets.join('+')] = 1; });
       // Start the new group on a basket combination not used yet, where possible.
-      var cols = colourChoices(d).map(function (c) { return c.id; }), pick = [cols[0]];
+      // Only colours that do not look like another colour in the preset.
+      var cols = colourChoices(d).filter(function (c) {
+        return !d.colours.some(function (x) { return x.id !== c.id && P.looksAlike(x.hex, c.hex); });
+      }).map(function (c) { return c.id; }), pick = [cols[0]];
       outer: for (var i = 0; i < cols.length; i++) {
         if (!used[cols[i]]) { pick = [cols[i]]; break; }
         for (var j = 0; j < cols.length; j++) if (!used[cols[i] + '+' + cols[j]]) { pick = [cols[i], cols[j]]; break outer; }
@@ -313,6 +353,7 @@
   }
 
   function init() {
+    if (!loaded) { loaded = true; loadMine(); }
     dlg = document.getElementById('presets');
     dlg.addEventListener('click', onClick);
     dlg.addEventListener('change', onInput);
@@ -322,6 +363,14 @@
       editing = null;
     });
     dlg.addEventListener('close', function () { editing = null; Alpha.settings.open(); });
+    // Another window saved or deleted a preset: reload the list.
+    window.addEventListener('storage', function (e) {
+      if (e.key != null && e.key.indexOf('alpha.' + KEY) !== 0) return;
+      loadMine();
+      Alpha.settings.notify();
+      if (dlg.open && !editing) render();
+      else if (dlg.open) { status = 'Presets were changed in another window.'; var st = dlg.querySelector('#pe-status'); if (st) st.textContent = status; }
+    });
   }
 
   Alpha.presetsUI = { init: init, open: open, all: all, find: find };

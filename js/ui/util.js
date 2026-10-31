@@ -20,7 +20,15 @@
     remove: function (key) { try { window.localStorage.removeItem('alpha.' + key); } catch (e) { /* ignore */ } },
     // The stored text as is (null if none or storage is blocked).
     raw: function (key) { try { return window.localStorage.getItem('alpha.' + key); } catch (e) { return null; } },
-    setRaw: function (key, text) { try { window.localStorage.setItem('alpha.' + key, text); return true; } catch (e) { return false; } }
+    setRaw: function (key, text) { try { window.localStorage.setItem('alpha.' + key, text); return true; } catch (e) { return false; } },
+    // Keys (without "alpha.") that start with a prefix; [] if storage is blocked.
+    keys: function (prefix) {
+      try {
+        var out = [], ls = window.localStorage;
+        for (var i = 0; i < ls.length; i++) { var k = ls.key(i); if (k && k.indexOf('alpha.' + prefix) === 0) out.push(k.slice(6)); }
+        return out.sort();
+      } catch (e) { return []; }
+    }
   };
 
   var SVGNS = 'http://www.w3.org/2000/svg';
