@@ -16,8 +16,11 @@
   // Numbers (with decimals) and words are separate tokens: "40mg" -> 40, mg.
   var TOKEN = /\d+(?:\.\d+)?|[a-z]+/g;
   function tokenize(s) {
-    // ".5" means 0.5
-    return String(s || '').toLowerCase().replace(/(^|[^\d])\.(\d)/g, function (m, a, b) { return a + '0.' + b; }).match(TOKEN) || [];
+    return String(s || '').toLowerCase()
+      .replace(/(^|[^\d])\.(\d)/g, function (m, a, b) { return a + '0.' + b; }) // ".5" means 0.5
+      // Micrograms: "µg" (micro sign or Greek mu) and "ug" are all "mcg".
+      .replace(/[µμ]/g, 'mc').replace(/(^|[^a-z])ug(?![a-z])/g, '$1mcg')
+      .match(TOKEN) || [];
   }
 
   // Edit distance, used only to order typo matches (closest first).

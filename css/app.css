@@ -187,6 +187,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .muted { color: var(--muted); }
 .small { font-size: .88rem; }
 .note-bad { color: var(--danger-line); font-weight: 600; }
+.note-warn { background: var(--est); border-left: 4px solid #000; padding: .3rem .5rem; }
 .rule-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .45rem; }
 .sevtag { font-size: .75rem; font-weight: 800; text-transform: uppercase; border: 1px solid; border-radius: 3px; padding: 0 .25rem; }
 .sevtag.warn { color: var(--warn-line); } .sevtag.danger { color: var(--danger-line); } .sevtag.info { color: var(--info-line); }

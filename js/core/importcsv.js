@@ -44,6 +44,35 @@
 
   function key(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
+  /* ---------- decoding the file's bytes ---------- */
+
+  // Excel and pharmacy systems do not always write UTF-8. A byte-order mark
+  // is honoured; otherwise the file is UTF-8 if its bytes are valid UTF-8,
+  // UTF-16 if every other byte is zero, and else Windows-1252 (what Excel's
+  // plain "CSV" writes on Windows). Returns { text, encoding, note } or
+  // { problem } for a file that is not text at all.
+  var CP1252_NOTE = 'This file is not UTF-8, so it was read as Windows-1252 (what Excel uses for plain "CSV"). Check that accented letters and symbols such as µ look right.';
+  function decode(bytes) {
+    var b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    function dec(enc, from, fatal) { return new TextDecoder(enc, { fatal: !!fatal }).decode(b.subarray(from)); }
+    if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) return { problem: 'This is an Excel workbook (.xlsx) or another zipped file, not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
+    if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return { problem: 'This is an old Excel workbook (.xls), not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
+    if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return { text: dec('utf-8', 3), encoding: 'UTF-8' };
+    if (b[0] === 0xFF && b[1] === 0xFE) return { text: dec('utf-16le', 2), encoding: 'UTF-16' };
+    if (b[0] === 0xFE && b[1] === 0xFF) return { text: dec('utf-16be', 2), encoding: 'UTF-16' };
+    // UTF-16 without a mark: zero bytes in every odd (LE) or even (BE) place.
+    var n = Math.min(b.length, 4096) & ~1, zeroOdd = 0, zeroEven = 0;
+    for (var i = 0; i < n; i += 2) { if (b[i] === 0) zeroEven++; if (b[i + 1] === 0) zeroOdd++; }
+    if (n >= 4) {
+      if (zeroOdd > n / 2 * 0.9 && zeroEven < n / 2 * 0.1) return { text: dec('utf-16le', 0), encoding: 'UTF-16', note: 'This file has no byte-order mark; it was read as UTF-16 because every other byte is zero.' };
+      if (zeroEven > n / 2 * 0.9 && zeroOdd < n / 2 * 0.1) return { text: dec('utf-16be', 0), encoding: 'UTF-16', note: 'This file has no byte-order mark; it was read as UTF-16 because every other byte is zero.' };
+    }
+    var text;
+    try { text = dec('utf-8', 0, true); } catch (e) { return { text: dec('windows-1252', 0), encoding: 'Windows-1252', note: CP1252_NOTE }; }
+    if (text.indexOf('\u0000') >= 0) return { problem: 'This file contains zero bytes, so it is not a text CSV file.' };
+    return { text: text, encoding: 'UTF-8' };
+  }
+
   /* ---------- reading the file ---------- */
 
   // Line endings are normalised to \n before reading (CRLF, CR and mixtures).
@@ -153,7 +182,8 @@
 
   // "ATORVASTATIN 40 MG TAB" -> drug, strength, form; only when there is no
   // strength column and the text clearly has a number with a unit.
-  var DESC = /^(.*?[a-z].*?)\s+(\d[\d.,/-]*\s*(?:mg|mcg|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose))?)(?![a-z0-9])\s*(.*)$/i;
+  // Micrograms may be written mcg, µg (micro sign or Greek mu) or ug.
+  var DESC = /^(.*?[a-z].*?)\s+(\d[\d.,/-]*\s*(?:mg|mcg|[µμ]g|ug|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose|hr|h|hours?|day|24\s*hr?))?)(?![a-z0-9])\s*(.*)$/i;
 
   // Why a value is not a usable NDC, in words.
   function whyBadNdc(raw) {
@@ -239,7 +269,7 @@
       var strength = get('strength'), form = get('form');
       if (!m.strength) {
         var sm = DESC.exec(drug);
-        if (sm && (/^\//.test(sm[3].trim()) || DESC.test(sm[3].trim()) || /\d\s*(mg|mcg|g|ml)\b/i.test(sm[3]))) {
+        if (sm && (/^\//.test(sm[3].trim()) || DESC.test(sm[3].trim()) || /\d\s*(mg|mcg|[µμ]g|ug|g|ml)\b/i.test(sm[3]))) {
           note('"' + drug + '" looks like a combination product, so it was not split into drug and strength');
           sm = null;
         }
@@ -392,6 +422,6 @@
     };
   }
 
-  return { parse: parse, lines: lines, mapColumns: mapColumns, importProducts: importProducts, applyRobotList: applyRobotList,
+  return { decode: decode, parse: parse, lines: lines, mapColumns: mapColumns, importProducts: importProducts, applyRobotList: applyRobotList,
     buildDataset: buildDataset, COLUMNS: COLUMNS };
 });

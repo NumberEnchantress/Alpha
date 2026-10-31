@@ -34,9 +34,14 @@
       var f = input.files && input.files[0];
       if (!f) { resolve(null); return; }
       var r = new FileReader();
-      r.onload = function () { resolve({ name: f.name, text: String(r.result) }); };
+      // Bytes, not text: the file may not be UTF-8 (see importcsv.decode).
+      r.onload = function () {
+        var d = Alpha.importcsv.decode(new Uint8Array(r.result));
+        if (d.problem) { reject(new Error(f.name + ' was not imported: ' + d.problem)); return; }
+        resolve({ name: f.name, text: d.text, encoding: d.encoding, note: d.note });
+      };
       r.onerror = function () { reject(new Error('Could not read ' + f.name)); };
-      r.readAsText(f);
+      r.readAsArrayBuffer(f);
     });
   }
 
@@ -52,11 +57,12 @@
       if (pf) {
         var res = Alpha.importcsv.importProducts(pf.text, layout);
         products = res.products; lineOf = res.lineOf; report.products = res.report; report.productsFile = pf.name;
+        report.productsEncoding = { encoding: pf.encoding, note: pf.note };
       } else {
         // Robot list only: apply it to a copy of the products in use now.
         products = JSON.parse(JSON.stringify(cur.products));
       }
-      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf }); report.robotFile = rf.name; }
+      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf }); report.robotFile = rf.name; report.robotEncoding = { encoding: rf.encoding, note: rf.note }; }
       var source = [pf && pf.name, rf && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: !pf && !!cur.meta.sample });
       report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
@@ -97,6 +103,12 @@
   // Rows with at least one note (a row can have several notes).
   function noteRows(notes) { var seen = {}; notes.forEach(function (n) { seen[n.row] = 1; }); return Object.keys(seen).length; }
 
+  // Only said when the file was not plain UTF-8.
+  function encodingNote(e) {
+    if (!e || !e.encoding || (e.encoding === 'UTF-8' && !e.note)) return '';
+    return '<p class="note-warn small" data-testid="encoding">Read as ' + esc(e.encoding) + '. ' + esc(e.note || '') + '</p>';
+  }
+
   function reportHtml(rep) {
     if (!rep) return '';
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>';
@@ -104,7 +116,8 @@
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
       h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
-        p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
+        p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>' +
+        encodingNote(rep.productsEncoding);
       h += '<p class="small">Columns used: ' + Object.keys(cols.used).map(function (k) { return esc(k) + ' ← "' + esc(cols.used[k]) + '"'; }).join(', ') +
         (cols.unused.length ? '. Ignored: ' + cols.unused.map(function (u) { return '"' + esc(u) + '"'; }).join(', ') : '') +
         (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
@@ -115,7 +128,8 @@
       var r = rep.robot;
       if (r.problem) h += '<p class="note-bad">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
-        (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>';
+        (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
+        encodingNote(rep.robotEncoding);
       var rrows = r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })
         .concat(r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'skipped: ' + x.reason }; }))
         .concat(r.notes.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; }));
