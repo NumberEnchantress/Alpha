@@ -50,9 +50,23 @@
   function decode(bytes) {
     var b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     function dec(enc, from, fatal) { return new TextDecoder(enc, { fatal: !!fatal }).decode(b.subarray(from)); }
+    // Control bytes (other than tab, line breaks and form feed) do not occur in
+    // text: a file with them is an image, a PDF or another binary file.
+    function binary(from) {
+      var n = Math.min(b.length, from + 8192), ctl = 0;
+      for (var i = from; i < n; i++) {
+        var c = b[i];
+        if ((c < 9 || (c > 13 && c < 32) || c === 127) && !(c === 26 && i === b.length - 1)) ctl++; // a final Ctrl-Z (old DOS end mark) is fine
+      }
+      return ctl > 0 ? { problem: 'This is not a text file (it looks like an image, a PDF or another kind of file), so it is not a CSV.' } : null;
+    }
     if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) return { problem: 'This is an Excel workbook (.xlsx) or another zipped file, not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
     if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return { problem: 'This is an old Excel workbook (.xls), not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
-    if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return { text: dec('utf-8', 3), encoding: 'UTF-8' };
+    if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) {
+      // A UTF-8 mark followed by bytes that are not UTF-8: read the rest as Windows-1252, and say so.
+      try { return { text: dec('utf-8', 3, true), encoding: 'UTF-8' }; }
+      catch (e) { return binary(3) || { text: dec('windows-1252', 3), encoding: 'Windows-1252', note: 'This file starts with a UTF-8 mark but is not UTF-8, so it was read as Windows-1252. Check that accented letters and symbols such as µ look right.' }; }
+    }
     if (b[0] === 0xFF && b[1] === 0xFE) return { text: dec('utf-16le', 2), encoding: 'UTF-16' };
     if (b[0] === 0xFE && b[1] === 0xFF) return { text: dec('utf-16be', 2), encoding: 'UTF-16' };
     // UTF-16 without a mark: zero bytes in every odd (LE) or even (BE) place.
@@ -63,9 +77,11 @@
       if (zeroEven > n / 2 * 0.9 && zeroOdd < n / 2 * 0.1) return { text: dec('utf-16be', 0), encoding: 'UTF-16', note: 'This file has no byte-order mark; it was read as UTF-16 because every other byte is zero.' };
     }
     var text;
-    try { text = dec('utf-8', 0, true); } catch (e) { return { text: dec('windows-1252', 0), encoding: 'Windows-1252', note: CP1252_NOTE }; }
+    try { text = dec('utf-8', 0, true); } catch (e) { return binary(0) || { text: dec('windows-1252', 0), encoding: 'Windows-1252', note: CP1252_NOTE }; }
     if (text.indexOf('\u0000') >= 0) return { problem: 'This file contains zero bytes, so it is not a text CSV file.' };
-    return { text: text, encoding: 'UTF-8' };
+    var bin = binary(0);
+    if (bin) return bin;
+    return { text: text.replace(/\u001a$/, ''), encoding: 'UTF-8' };
   }
 
   /* ---------- reading the file ---------- */
@@ -106,11 +122,16 @@
       var cur = r.meta.cursor, cells = r.data;
       var inner = cells.join('').split('\n').length - 1;
       var quoteErr = (r.errors || []).some(function (e) { return e.type === 'Quotes'; });
-      // (Extra fields that are all blank are a trailing comma, not a swallowed row.)
-      var tooFew = expected != null && cells.length < expected;
-      var tooMany = expected != null && cells.length > expected && cells.slice(expected).some(function (c) { return String(c).trim() !== ''; });
-      var swallowed = inner > 0 && (expected === 1 || tooFew || tooMany || cells.some(function (c) {
-        return String(c).split('\n').slice(1).some(function (s) { return NDC_INSIDE.test(s); });
+      // A stray quote that swallows rows leaves a record whose field count is
+      // off, or, when the count happens to come out right (it closes in the
+      // same column of a later row), a field holding at least a whole row's
+      // worth of delimiters (header fields - 1). So a field with line breaks is
+      // refused when its record has a different field count, when it holds
+      // that many delimiters or an NDC anywhere, or when the file has one column.
+      var swallowed = inner > 0 && expected != null && (expected === 1 || cells.length !== expected || cells.some(function (c) {
+        c = String(c);
+        if (c.indexOf('\n') < 0) return false;
+        return NDC_INSIDE.test(c) || c.split(delim).length - 1 >= expected - 1;
       }));
       if (quoteErr || swallowed) {
         problem = { line: l, why: quoteErr ? QUOTE_PROBLEM : SWALLOWED };
@@ -192,6 +213,14 @@
     return 'NDC "' + s + '" is not a valid NDC form';
   }
 
+  // Excel keeps a value as text with a leading apostrophe ('99999-...) or as
+  // a formula (="99999-..."); the text inside is the value.
+  function excelText(s) {
+    var m = /^="(.*)"$/.exec(s);
+    if (m) return m[1].trim();
+    return s.charAt(0) === "'" ? s.slice(1).trim() : s;
+  }
+
   function findLocation(code, layout) {
     var c = String(code).trim().toUpperCase();
     if (!c) return null;
@@ -213,6 +242,21 @@
      is the line in the file. Every data row is either imported (perhaps with
      notes) or skipped; with fatal set, nothing is imported and problem says
      which lines were not read. */
+  // If most rows (of 3 or more) have another number of fields than the header
+  // (a trailing comma on every line but not on the header, or the other way
+  // round), the rows that do match the header are the odd ones and may be
+  // shifted: the file is refused with what to fix. Returns the message or null.
+  function shapeProblem(rows, width) {
+    if (rows.length < 3) return null;
+    var freq = {}, mode = width;
+    rows.forEach(function (r) { freq[r.count] = (freq[r.count] || 0) + 1; });
+    Object.keys(freq).forEach(function (c) { if (freq[c] > (freq[mode] || 0)) mode = Number(c); });
+    if (mode === width || freq[mode] * 2 <= rows.length) return null;
+    return 'Most rows (' + freq[mode] + ' of ' + rows.length + ') have ' + mode + ' fields, but the header has ' + width + ', so it cannot be known which values belong to which column. ' +
+      (mode > width ? 'Usually each line ends with a comma and the header does not: add ' + (mode - width) + ' comma' + (mode - width > 1 ? 's' : '') + ' to the end of the header line, or remove the trailing commas from the rows.'
+        : 'Usually the header ends with a comma the rows do not have: remove it from the header line.') +
+      ' Nothing was imported; fix the file and import again.';
+  }
   var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|tab|tabs|cap|caps|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
   function blankCell(c) { return !String(c == null ? '' : c).trim(); }
   function importProducts(text, layout) {
@@ -222,7 +266,12 @@
     var products = [], seen = {}, lineOf = {};
     var stop = function (msg) { report.problem = msg; report.fatal = true; return { products: [], lineOf: {}, report: report }; };
     if (p.empty) return stop('The file is empty.');
-    if (p.problem) { report.rows = 0; return stop(quoteProblem(p.problem, p.lastLine, 'imported')); }
+    if (p.problem) {
+      // Rows before the problem that already have the wrong shape (a trailing
+      // comma on each line) point to the real cause; say that instead.
+      report.rows = 0;
+      return stop(shapeProblem(p.rows, p.fields.length) || quoteProblem(p.problem, p.lastLine, 'imported'));
+    }
     if (p.headBad) return stop('The header (line ' + p.headLine + ') runs over several lines, so the columns cannot be known. Nothing was imported. Fix that line and import again.');
     if (!p.rows.length) return stop('The file has a header line but no rows.');
     ['ndc', 'drug', 'location', 'shelf'].forEach(function (c) { if (!m[c]) report.columns.missing.push(c); });
@@ -243,21 +292,28 @@
     }
 
     // Values are matched to columns by position, so a row with a different
-    // number of fields may be shifted (an unquoted comma inside a value, or a
-    // missing one): it is skipped, never guessed. Two exceptions that cannot
-    // shift anything: blank header names at the end (their cells may be left
-    // off), and a file where every row (5 or more) ends with the same number
-    // of extra empty fields (a trailing comma on every line).
-    var width = p.fields.length, named = width;
-    while (named > 0 && !p.fields[named - 1]) named--;
-    var pad = 0, k0 = p.rows[0].count - width;
-    if (p.rows.length >= 5 && k0 > 0 && p.rows.every(function (r) { return r.count === width + k0 && r.cells.slice(width).every(blankCell); })) {
-      pad = k0;
-      report.fileNotes.push('Every row ends with ' + pad + ' more empty field' + (pad > 1 ? 's' : '') + ' than the header (a trailing comma on each line); ' + (pad > 1 ? 'they were' : 'it was') + ' ignored.');
-    }
+    // number of fields from the header may be shifted (an unquoted comma
+    // inside a value, or a missing one): it is skipped, never guessed. There
+    // are no exceptions, not even for blank trailing fields: an extra comma
+    // plus an empty last column looks exactly like a trailing comma.
+    // Cells under blank header names must be blank too.
+    var width = p.fields.length;
+    var shape = shapeProblem(p.rows, width);
+    if (shape) return stop(shape);
+    // A value that starts with a space, in a column whose values do not, is
+    // what an unquoted ", " inside text leaves behind ("AMOXICILLIN, CLAV..."
+    // split in two). A column where most rows (of 3 or more) start with a
+    // space, as in files written "a, b, c", is not checked.
+    var spaced = p.fields.map(function (f, i) {
+      var n = 0; p.rows.forEach(function (r) { if (/^\s+\S/.test(String(r.cells[i] == null ? '' : r.cells[i]))) n++; });
+      return i > 0 && !(p.rows.length >= 3 && n * 2 > p.rows.length);
+    });
     function fits(row) {
-      if (row.count === width + pad) return true;
-      return row.count >= named && row.count <= width && row.cells.slice(named).every(blankCell);
+      return row.count === width && p.fields.every(function (f, i) { return f || blankCell(row.cells[i]); });
+    }
+    function splitAt(row) {
+      for (var i = 1; i < width; i++) if (spaced[i] && /^\s+\S/.test(String(row.cells[i] == null ? '' : row.cells[i]))) return i;
+      return -1;
     }
 
     p.rows.forEach(function (row) {
@@ -266,16 +322,27 @@
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
       if (!fits(row)) {
-        report.skipped.push({ row: line, ndc: rawNdc, reason: 'has ' + row.count + ' fields but the header has ' + width +
-          ' (an unquoted comma inside a value, or a missing one), so its values cannot be matched to columns safely' });
+        report.skipped.push({ row: line, ndc: rawNdc, reason: row.count !== width
+          ? 'has ' + row.count + ' fields but the header has ' + width + ' (an unquoted comma inside a value, or a missing one), so its values cannot be matched to columns safely'
+          : 'has a value under a column with no name, so its values may be shifted (an unquoted comma inside a value?) and cannot be matched to columns safely' });
+        return;
+      }
+      var sp = splitAt(row);
+      if (sp > 0) {
+        report.skipped.push({ row: line, ndc: rawNdc, reason: 'the "' + (p.fields[sp] || 'column ' + (sp + 1)) + '" value "' + String(row.cells[sp]).slice(0, 30) +
+          '" starts with a space, which usually means an unquoted comma split a value, so its values may be shifted and cannot be matched to columns safely' });
         return;
       }
       if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
+      var xl = excelText(rawNdc);
+      if (xl !== rawNdc && ndc.normalize(xl)) { note('NDC ' + rawNdc + ' read as ' + xl + ' (Excel\'s way of keeping it as text)'); rawNdc = xl; }
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
+      // A drug name with no letters ("060") is a value from another column: the row is shifted.
+      if (!/\p{L}/u.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'the drug name "' + drug.slice(0, 30) + '" has no letters, so the values are probably shifted (a missing or extra field) and cannot be matched to columns safely' }); return; }
       seen[n] = line; lineOf[n] = line;
 
       var prod = { ndc: n, drug: drug };
@@ -320,12 +387,16 @@
         } else { prod.location = rawLoc.toUpperCase(); note('location "' + rawLoc + '" is not on the layout yet; the map will say so'); }
       }
       var unit = null, rawUnit = get('unit'), unitWhy = '';
-      if (unitInLoc && (!rawUnit || key(rawUnit) === key(unitInLoc.id) || key(rawUnit) === key(unitInLoc.label))) { unit = unitInLoc; prod.unit = unit.id; }
+      // A placeholder such as "-", "?" or "n/a" means no unit was given.
+      if (rawUnit && (!key(rawUnit) || /^n\/?a$/i.test(rawUnit))) { note('unit "' + rawUnit + '" read as not given'); rawUnit = ''; }
+      // Names match only when both have letters or digits (a unit may have no label).
+      var sameUnit = function (u) { var r = key(rawUnit); return !!r && (r === key(u.id) || (!!key(u.label) && r === key(u.label))); };
+      if (unitInLoc && (!rawUnit || sameUnit(unitInLoc))) { unit = unitInLoc; prod.unit = unit.id; }
       else if (unitInLoc) { note('unit "' + rawUnit + '" does not match the unit ' + unitInLoc.id + ' given as the location; unit left unknown'); unitWhy = 'the unit columns disagree'; }
       else if (rawUnit) {
         if (!loc) { note('unit "' + rawUnit + '" ignored: no known location'); unitWhy = 'no known location'; }
         else {
-          unit = loc.units.filter(function (u) { return key(u.id) === key(rawUnit) || key(u.label) === key(rawUnit); })[0] || null;
+          unit = loc.units.filter(sameUnit)[0] || null;
           if (unit) prod.unit = unit.id;
           else { note('unit "' + rawUnit + '" is not part of ' + loc.code + '; unit left unknown'); unitWhy = 'unit "' + rawUnit + '" not recognised'; }
         }
@@ -405,7 +476,15 @@
     var seen = {};
     for (var i = start; i < rows.length; i++) {
       var line = rows[i].line;
-      var raw = String(rows[i].cells[col] || '').trim(), n = ndc.normalize(raw);
+      var raw = String(rows[i].cells[col] || '').trim();
+      // Every row must have the first row's number of fields, or the NDC column is not known for it.
+      if (rows[i].cells.length !== rows[0].cells.length) {
+        report.skipped.push({ row: line, ndc: rows[i].cells.map(function (c) { return String(c).trim(); }).join(',').slice(0, 40),
+          reason: 'has ' + rows[i].cells.length + ' fields but the first line has ' + rows[0].cells.length + ', so its NDC column is not known' });
+        continue;
+      }
+      if (excelText(raw) !== raw && ndc.normalize(excelText(raw))) { report.notes.push({ row: line, ndc: raw, note: 'read as ' + excelText(raw) + ' (Excel\'s way of keeping it as text)' }); raw = excelText(raw); }
+      var n = ndc.normalize(raw);
       if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
       seen[n] = line;
@@ -456,7 +535,8 @@
     opts = opts || {};
     return {
       meta: { id: 'imported', name: (base.layout.name || 'Pharmacy') + (opts.productsAreSample ? ' + robot list' : ' + imported products'),
-        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && base.meta.sample), source: source || 'CSV import' },
+        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && base.meta.sample), source: source || 'CSV import',
+        robotPrior: opts.robotPrior || undefined },
       layout: base.layout, products: products, rules: base.rules, basketSchemes: base.basketSchemes,
       groupLabels: base.groupLabels || []
     };

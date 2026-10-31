@@ -13,7 +13,7 @@
 
   var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 2;
   var MAX_NAME = 60, MAX_LABEL = 40, MAX_COLOUR_NAME = 24, MAX_FILE_BYTES = 256 * 1024;
-  var MIN_COLOUR_DISTANCE = 60; // RGB distance below which two colours look alike
+  var MIN_COLOUR_DISTANCE = 70; // RGB distance below which two colours look alike
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
 
   // Colours offered in the editor, besides any a preset already uses.
@@ -34,14 +34,29 @@
   // Runs of spaces, tabs and zero-width characters look like one space on
   // screen, and "\u00E9" can be one character or "e" plus an accent: both are
   // stored the same way (NFC), so look-alike text compares as equal.
-  function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B-\u200D\uFEFF]+/g, ' ').trim() : ''; }
+  function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B\u200C\uFEFF]+/g, ' ').trim() : ''; }
+  // The form used to compare names and labels: also folds compatibility
+  // forms (fullwidth letters, ligatures such as "ﬁ") and case.
+  function sameKey(s) { return clean(s).normalize('NFKC').toLowerCase(); }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
   // Invisible characters (control codes, zero-width, soft hyphen, direction
   // marks, variation selectors, tag characters, blank braille) are refused.
-  var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
-  function invisible(s) { return isStr(s) && INVISIBLE.test(s); }
+  var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{13430}-\u{1343F}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
+  // Emoji joined by zero-width joiners, with their variation selectors, are visible.
+  var EMOJI = /\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
+  function invisible(s) { return isStr(s) && INVISIBLE.test(s.replace(EMOJI, 'E')); }
+  // What is wrong with a piece of text that looks fine, or null.
+  function textProblem(s) {
+    if (!isStr(s)) return null;
+    if (invisible(s)) return 'contains invisible characters; type it again';
+    if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
+    if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
+    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u].filter(function (re) { return re.test(s); });
+    if (scripts.length > 1) return 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters), which can look like other text; type it again';
+    return null;
+  }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
   function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
   function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE; }
@@ -77,7 +92,7 @@
   function check(p) {
     var errors = [];
     if (!p || typeof p !== 'object' || Array.isArray(p)) return ['Not a preset.'];
-    if (invisible(p.name)) errors.push('The name contains invisible characters; type it again.');
+    if (textProblem(p.name)) errors.push('The name ' + textProblem(p.name) + '.');
     else if (!isStr(p.name) || blank(p.name)) errors.push('Give the preset a name.');
     else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
 
@@ -90,17 +105,17 @@
         return;
       }
       var name = clean(c.name);
-      if (invisible(c.name)) { errors.push('A colour name contains invisible characters.'); return; }
+      if (textProblem(c.name)) { errors.push('The colour name "' + name.slice(0, 30) + '" ' + textProblem(c.name) + '.'); return; }
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       var std = standard(name);
       if (std && distance(std.hex, c.hex) >= 80) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + name.toLowerCase() + '.');
       else if (!std && wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like its name.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
-      if (names[name.toLowerCase()]) errors.push('Two colours are called "' + name + '".');
+      if (names[sameKey(name)]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];
       if (near) errors.push('The colours "' + near.name + '" and "' + name + '" look too alike to tell baskets apart.');
-      colours[c.id] = c; names[name.toLowerCase()] = 1; seenHex.push({ hex: c.hex, name: name });
+      colours[c.id] = c; names[sameKey(name)] = 1; seenHex.push({ hex: c.hex, name: name });
     });
 
     if (!Array.isArray(p.groups)) { errors.push('The preset has no group list.'); return errors; }
@@ -112,11 +127,11 @@
       var n = 'Group ' + (i + 1);
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
       var label = clean(g.label);
-      if (invisible(g.label)) errors.push(n + ': the label contains invisible characters; type it again.');
+      if (textProblem(g.label)) errors.push(n + ': the label ' + textProblem(g.label) + '.');
       else if (!isStr(g.label) || blank(g.label)) errors.push(n + ' needs a label.');
       else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
-      else if (labels[label.toLowerCase()]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[label.toLowerCase()] + '.');
-      else labels[label.toLowerCase()] = i + 1;
+      else if (labels[sameKey(label)]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[sameKey(label)] + '.');
+      else labels[sameKey(label)] = i + 1;
       var b = g.baskets;
       if (!Array.isArray(b) || !b.every(isStr)) { errors.push(n + ': baskets must be a list of colour ids.'); return; }
       if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
@@ -181,7 +196,7 @@
     return out;
   }
 
-  return { check: check, tidy: tidy, clean: clean, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
+  return { check: check, tidy: tidy, clean: clean, sameKey: sameKey, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
     MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });

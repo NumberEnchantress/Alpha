@@ -12,17 +12,32 @@
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
 
   var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
-  var saved = true, usable = true, unreadable = false, hooks = {}, dlg = null;
+  var saved = true, usable = true, unreadable = false, backupKey = null, hooks = {}, dlg = null;
 
+  // Saved settings that cannot be read (or hold values of the wrong kind) are
+  // never written over unasked: a copy is kept first, under the first free
+  // key alpha.prefs-unreadable, -2, -3 ... (an identical copy is not made
+  // twice). If no copy can be kept, settings are not saved at all, so the
+  // original stays. The defaults are used and the page says so.
+  function wrongKinds(p) {
+    return ('scheme' in p && p.scheme !== null && typeof p.scheme !== 'string') || ('scale' in p && typeof p.scale !== 'string') ||
+      ('disabled' in p && (typeof p.disabled !== 'object' || p.disabled === null || Array.isArray(p.disabled))) || ('custom' in p && !Array.isArray(p.custom));
+  }
+  function keepCopy(raw) {
+    for (var i = 1; i <= 20; i++) {
+      var k = 'prefs-unreadable' + (i > 1 ? '-' + i : ''), have = store.raw(k);
+      if (have === raw) return k;
+      if (have == null) return store.setRaw(k, raw) ? k : null;
+    }
+    return null;
+  }
   function load() {
     var raw = store.raw('prefs'), p = null;
-    unreadable = false;
+    unreadable = false; backupKey = null;
     if (raw != null) { try { p = JSON.parse(raw); } catch (e) { p = null; } }
-    if (raw != null && (!p || typeof p !== 'object' || Array.isArray(p))) {
-      // Unreadable saved settings: keep a copy (once) rather than lose them on
-      // the next save, use the defaults, and say so.
+    if (raw != null && (!p || typeof p !== 'object' || Array.isArray(p) || wrongKinds(p))) {
       unreadable = true;
-      if (store.raw('prefs-unreadable') == null) store.setRaw('prefs-unreadable', raw);
+      backupKey = keepCopy(raw);
       return;
     }
     if (p) {
@@ -32,7 +47,11 @@
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
     }
   }
-  function save() { saved = store.set('prefs', prefs); if (saved) unreadable = false; }
+  function save() {
+    if (unreadable && !backupKey) { saved = false; return; } // the unreadable original has no copy: keep it
+    saved = store.set('prefs', prefs);
+    if (saved) unreadable = false;
+  }
   usable = store.usable(); saved = usable; // false when the browser blocks storage
   function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); }
 
@@ -46,7 +65,8 @@
   // When the chosen preset cannot be found, say so instead of quietly showing another.
   function schemeProblem(ds) {
     var s = scheme(ds);
-    if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). A copy was kept as alpha.prefs-unreadable. Check Settings.';
+    if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). ' +
+      (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (storage full), so they are left as they are and changes are not saved.') + ' Check Settings.';
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
   }
@@ -76,7 +96,9 @@
     var h = '<h2 id="settings-title">Settings</h2>';
     if (!usable) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
     else if (!saved) h += '<p class="note-bad">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
-    if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. A copy of them was kept in this browser as alpha.prefs-unreadable; the next change you make here replaces them.</p>';
+    if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. ' +
+      (backupKey ? 'A copy of them was kept in this browser as alpha.' + esc(backupKey) + '; the next change you make here replaces the unreadable settings.'
+        : 'No copy could be kept (the storage in this browser is full), so they are left as they are and changes made here are not saved.') + '</p>';
 
     var builtIns = {};
     (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });
@@ -194,6 +216,7 @@
   load();
   applyScale();
   Alpha.settings = {
+    savedOk: function () { return saved; },
     init: init, open: open, scheme: scheme, schemeProblem: schemeProblem, useScheme: useScheme, notify: changed, disabledRules: disabledRules, customRules: customRules,
     importedDataset: function () { return Alpha.importer ? Alpha.importer.dataset() : null; },
     reload: function () { if (hooks.reload) hooks.reload(); }

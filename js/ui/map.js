@@ -9,7 +9,7 @@
 (function (Alpha) {
   'use strict';
   var esc = Alpha.ui.esc;
-  var el = null, svg = null, layout = null, marker = null, markerEst = null, title = null, lastHi = [];
+  var el = null, svg = null, layout = null, marker = null, markerEst = null, markerRing = null, title = null, lastHi = [];
   var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
 
   function unitLabel(loc, unit) {
@@ -59,13 +59,14 @@
     // Where to stand: a disc with a pointer, placed by show().
     // Drawn last, so nothing covers it. Its contents are in standard units and
     // the group is scaled by k.
-    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="3"/><text class="marker-text" y="0.1" font-size="2.3">YOU</text>' +
-      '<g class="marker-est" visibility="hidden"><rect x="-3.6" y="-1.45" width="7.2" height="2.9" rx="0.5"/><text y="0" font-size="2">EST.</text></g></g>');
+    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle class="marker-ring" r="4.3" visibility="hidden"/><circle class="marker-dot" r="3"/><text class="marker-text" y="0.1" font-size="2.3">YOU</text>' +
+      '<g class="marker-est" visibility="hidden"><rect x="' + (-TAG_W / 2) + '" y="' + (-TAG_H / 2) + '" width="' + TAG_W + '" height="' + TAG_H + '" rx="0.5"/><text y="0.1" font-size="2.3">EST.</text></g></g>');
     parts.push('</svg>');
     el.innerHTML = parts.join('');
     svg = el.firstChild;
     marker = el.querySelector('#map-marker');
     markerEst = marker.querySelector('.marker-est');
+    markerRing = marker.querySelector('.marker-ring');
   }
 
   // A thick strip on the side the unit is approached from.
@@ -96,6 +97,7 @@
     lastHi = [];
     marker.setAttribute('visibility', 'hidden');
     markerEst.setAttribute('visibility', 'hidden');
+    markerRing.setAttribute('visibility', 'hidden');
     if (!loc || !loc.location) {
       title.textContent = !loc ? 'Floor map' : loc.code != null ? 'Floor map · ' + loc.code + ' is not on the map yet' : 'Floor map · location unknown';
       return;
@@ -125,8 +127,10 @@
         marker.setAttribute('visibility', 'visible');
         if (loc.unitStatus === 'estimated') {
           var off = tagOffset(p);
-          markerEst.setAttribute('transform', 'translate(' + off[0] + ' ' + off[1] + ')');
-          markerEst.setAttribute('visibility', 'visible');
+          if (off) {
+            markerEst.setAttribute('transform', 'translate(' + off[0] + ' ' + off[1] + ')');
+            markerEst.setAttribute('visibility', 'visible');
+          } else markerRing.setAttribute('visibility', 'visible'); // no free spot: a dashed ring says "estimated"
         }
         if (narrow.matches) scrollToX(p[0]);
       }
@@ -143,28 +147,30 @@
   }
 
   // Where the EST. tag goes, relative to the marker (standard units): the
-  // first of below, right, left, above whose box overlaps no unit or feature.
-  // The box is padded so the tag's outline never touches a unit's outline
-  // (Firefox counts strokes in element boxes; Chromium does not).
-  // If every spot touches something, the one with the least overlap wins.
-  var TAG_SPOTS = [[0, 4.9], [7.3, 0], [-7.3, 0], [0, -4.9], [-5.5, 4.9], [5.5, 4.9], [-5.5, -4.9], [5.5, -4.9]];
+  // first spot, nearest first, whose box (with a margin, so outlines never
+  // touch) covers no unit, label or feature and stays on the floor. Spots are
+  // tried in three rings of eight around the marker. If none is free there is
+  // no tag; a dashed ring round the marker shows "estimated" instead.
+  var TAG_W = 8.6, TAG_H = 3.4, TAG_PAD = 0.7, R = 3; // tag box, margin, marker radius
+  var DIRS = [[0, 1], [1, 0], [-1, 0], [0, -1], [-1, 1], [1, 1], [-1, -1], [1, -1]];
+  var TAG_SPOTS = [];
+  [0, 3, 6.5].forEach(function (extra) {
+    DIRS.forEach(function (d) {
+      TAG_SPOTS.push([d[0] * (R + TAG_PAD + TAG_W / 2 + extra), d[1] * (R + TAG_PAD + TAG_H / 2 + extra)]);
+    });
+  });
   function tagOffset(p) {
-    var boxes = [], best = 0, bestArea = Infinity;
+    var boxes = [];
     layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(u.rect); }); });
     (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
+    var hw = (TAG_W / 2 + TAG_PAD) * k, hh = (TAG_H / 2 + TAG_PAD) * k;
     for (var i = 0; i < TAG_SPOTS.length; i++) {
-      var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k, hw = 4.3 * k, hh = 2.1 * k, area = 0;
-      // Any part outside the floor counts as covered: the tag must stay on the map.
-      var inW = Math.max(0, Math.min(cx + hw, layout.width) - Math.max(cx - hw, 0)), inH = Math.max(0, Math.min(cy + hh, layout.depth) - Math.max(cy - hh, 0));
-      area += 4 * hw * hh - inW * inH;
-      boxes.forEach(function (r) {
-        var w = Math.min(cx + hw, r.x + r.w) - Math.max(cx - hw, r.x), h = Math.min(cy + hh, r.y + r.h) - Math.max(cy - hh, r.y);
-        if (w > 0 && h > 0) area += w * h;
-      });
-      if (!area) return TAG_SPOTS[i];
-      if (area < bestArea) { bestArea = area; best = i; }
+      var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k;
+      if (cx - hw < 0 || cy - hh < 0 || cx + hw > layout.width || cy + hh > layout.depth) continue;
+      var hit = boxes.some(function (r) { return cx + hw > r.x && cx - hw < r.x + r.w && cy + hh > r.y && cy - hh < r.y + r.h; });
+      if (!hit) return TAG_SPOTS[i];
     }
-    return TAG_SPOTS[best];
+    return null;
   }
 
   function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
