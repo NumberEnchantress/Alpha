@@ -12,19 +12,28 @@
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
 
   var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
-  var saved = true, hooks = {}, dlg = null;
+  var saved = true, usable = true, unreadable = false, hooks = {}, dlg = null;
 
   function load() {
-    var p = store.get('prefs', null);
-    if (p && typeof p === 'object') {
+    var raw = store.raw('prefs'), p = null;
+    unreadable = false;
+    if (raw != null) { try { p = JSON.parse(raw); } catch (e) { p = null; } }
+    if (raw != null && (!p || typeof p !== 'object' || Array.isArray(p))) {
+      // Unreadable saved settings: keep a copy (once) rather than lose them on
+      // the next save, use the defaults, and say so.
+      unreadable = true;
+      if (store.raw('prefs-unreadable') == null) store.setRaw('prefs-unreadable', raw);
+      return;
+    }
+    if (p) {
       prefs.scheme = p.scheme || null;
       prefs.scale = SCALES.some(function (s) { return s[0] === p.scale; }) ? p.scale : '1';
       prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
     }
   }
-  function save() { saved = store.set('prefs', prefs); }
-  saved = store.set('probe', 1); // false when the browser blocks storage
+  function save() { saved = store.set('prefs', prefs); if (saved) unreadable = false; }
+  usable = store.usable(); saved = usable; // false when the browser blocks storage
   function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); }
 
   // The basket preset in use: built-in (data file) or the user's own.
@@ -37,6 +46,7 @@
   // When the chosen preset cannot be found, say so instead of quietly showing another.
   function schemeProblem(ds) {
     var s = scheme(ds);
+    if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). A copy was kept as alpha.prefs-unreadable. Check Settings.';
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
   }
@@ -64,7 +74,9 @@
   function build() {
     var ds = Alpha.state.ds, S = Alpha.state, cur = scheme(ds);
     var h = '<h2 id="settings-title">Settings</h2>';
-    if (!saved) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
+    if (!usable) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
+    else if (!saved) h += '<p class="note-bad">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
+    if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. A copy of them was kept in this browser as alpha.prefs-unreadable; the next change you make here replaces them.</p>';
 
     var builtIns = {};
     (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });

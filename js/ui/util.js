@@ -11,6 +11,9 @@
 
   // localStorage can be missing or throw (private mode, file:// policies).
   var store = {
+    // Can this page use localStorage at all? (False when blocked; a full
+    // storage is still usable: reads work and writes fail one by one.)
+    usable: function () { try { window.localStorage.getItem('alpha.probe'); return true; } catch (e) { return false; } },
     get: function (key, dflt) {
       try { var v = window.localStorage.getItem('alpha.' + key); return v == null ? dflt : JSON.parse(v); } catch (e) { return dflt; }
     },
