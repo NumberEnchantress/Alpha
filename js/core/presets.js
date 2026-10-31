@@ -12,7 +12,8 @@
   'use strict';
 
   var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 2;
-  var FILE_TYPE = 'alpha-basket-preset';
+  var MAX_NAME = 60, MAX_LABEL = 40, MAX_FILE_BYTES = 256 * 1024;
+  var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
 
   // Colours offered in the editor, besides any a preset already uses.
   var COLOUR_CHOICES = [
@@ -28,71 +29,105 @@
     { id: 'grey', name: 'Grey', hex: '#8a8a8a' }
   ];
 
-  function clean(s) { return String(s == null ? '' : s).trim(); }
+  function isStr(s) { return typeof s === 'string'; }
+  function clean(s) { return isStr(s) ? s.trim() : ''; }
+  function map() { return Object.create(null); } // no inherited keys such as "constructor"
 
   // Problems with a preset, as plain sentences. Empty list = valid.
   function check(p) {
     var errors = [];
-    if (!p || typeof p !== 'object') return ['Not a preset.'];
-    if (!clean(p.name)) errors.push('Give the preset a name.');
-    var colours = {};
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return ['Not a preset.'];
+    if (!isStr(p.name) || !clean(p.name)) errors.push('Give the preset a name.');
+    else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
+
+    var colours = map(), names = map(), hexes = map();
+    if (!Array.isArray(p.colours)) errors.push('The preset has no colour list.');
     (Array.isArray(p.colours) ? p.colours : []).forEach(function (c) {
-      if (!c || !clean(c.id) || !clean(c.name) || !/^#[0-9a-f]{6}$/i.test(c.hex || '')) errors.push('A colour is missing its id, name or hex code.');
-      else colours[c.id] = c;
+      if (!c || !isStr(c.id) || !clean(c.id) || !isStr(c.name) || !clean(c.name) || !isStr(c.hex) || !/^#[0-9a-f]{6}$/i.test(c.hex)) {
+        errors.push('A colour is missing its id, name or hex code (like #1a1a1a).');
+        return;
+      }
+      if (colours[c.id]) errors.push('The colour id "' + c.id + '" is listed twice.');
+      // Two colours that look the same, or share a name, cannot tell groups apart.
+      else if (names[c.name.toLowerCase()] || hexes[c.hex.toLowerCase()]) errors.push('The colour "' + c.name + '" looks the same as, or has the same name as, another colour in the preset.');
+      colours[c.id] = c; names[c.name.toLowerCase()] = 1; hexes[c.hex.toLowerCase()] = 1;
     });
-    var groups = Array.isArray(p.groups) ? p.groups : [];
+
+    if (!Array.isArray(p.groups)) { errors.push('The preset has no group list.'); return errors; }
+    var groups = p.groups;
     if (groups.length < MIN_GROUPS) errors.push('A preset needs at least ' + MIN_GROUPS + ' groups (it has ' + groups.length + ').');
-    if (groups.length > MAX_GROUPS) errors.push('A preset can have at most ' + MAX_GROUPS + ' groups.');
-    var labels = {}, combos = {};
+    if (groups.length > MAX_GROUPS) { errors.push('A preset can have at most ' + MAX_GROUPS + ' groups (it has ' + groups.length + ').'); return errors; }
+    var labels = map(), combos = map();
     groups.forEach(function (g, i) {
       var n = 'Group ' + (i + 1);
-      var label = clean(g && g.label);
-      if (!label) errors.push(n + ' needs a label.');
+      if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
+      var label = clean(g.label);
+      if (!isStr(g.label) || !label) errors.push(n + ' needs a label.');
+      else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
       else if (labels[label.toLowerCase()]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[label.toLowerCase()] + '.');
       else labels[label.toLowerCase()] = i + 1;
-      var b = Array.isArray(g && g.baskets) ? g.baskets : [];
+      var b = g.baskets;
+      if (!Array.isArray(b) || !b.every(isStr)) { errors.push(n + ': baskets must be a list of colour ids.'); return; }
       if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
-      b.forEach(function (id) { if (!colours[id]) errors.push(n + ' uses a colour that is not in the preset ("' + id + '").'); });
-      // Baskets are what staff see, so two groups must never look the same.
-      var key = b.join('+');
-      if (b.length && combos[key]) {
-        errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return colours[id] ? colours[id].name : id; }).join(' + ') + ').');
-      } else if (b.length) combos[key] = i + 1;
+      var ok = true;
+      b.forEach(function (id) { if (!colours[id]) { ok = false; errors.push(n + ' uses a colour that is not in the preset ("' + id + '").'); } });
+      if (!ok || !b.length) return;
+      // What staff see is the colours, so compare by colour, in order.
+      var key = b.map(function (id) { return colours[id].hex.toLowerCase(); }).join('+');
+      if (combos[key]) errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return colours[id].name; }).join(' + ') + ').');
+      else combos[key] = i + 1;
     });
     return errors;
   }
 
-  function slug(s) { return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'preset'; }
+  function slug(s) { return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'preset'; }
 
   // Keeps only the fields a preset has, and only the colours it uses.
+  // Call on a preset that passed check().
   function tidy(p) {
-    var used = {};
-    (p.groups || []).forEach(function (g) { (g.baskets || []).forEach(function (b) { used[b] = 1; }); });
+    var used = map();
+    p.groups.forEach(function (g) { g.baskets.forEach(function (b) { used[b] = 1; }); });
     return {
       id: clean(p.id) || 'user-' + slug(p.name),
       name: clean(p.name),
-      colours: (p.colours || []).filter(function (c) { return used[c.id]; }).map(function (c) { return { id: c.id, name: clean(c.name), hex: c.hex }; }),
-      groups: (p.groups || []).map(function (g) { return { label: clean(g.label), baskets: (g.baskets || []).slice() }; })
+      colours: p.colours.filter(function (c) { return used[c.id]; }).map(function (c) { return { id: c.id, name: clean(c.name), hex: c.hex }; }),
+      groups: p.groups.map(function (g) { return { label: clean(g.label), baskets: g.baskets.slice() }; })
     };
   }
 
   function toFile(p) {
     var t = tidy(p);
-    return JSON.stringify({ type: FILE_TYPE, version: 1, preset: { name: t.name, colours: t.colours, groups: t.groups } }, null, 2) + '\n';
+    return JSON.stringify({ type: FILE_TYPE, version: FILE_VERSION, preset: { name: t.name, colours: t.colours, groups: t.groups } }, null, 2) + '\n';
   }
 
-  // Reads a preset .json file. Returns { preset, errors }.
+  /* Reads a preset .json file. Returns { preset, errors, warnings }.
+     warnings: fields that were ignored (the preset still loads). */
   function fromFile(text) {
+    var out = { preset: null, errors: [], warnings: [] };
+    text = String(text == null ? '' : text);
+    if (text.length > MAX_FILE_BYTES) { out.errors.push('The file is too large to be a preset (over ' + (MAX_FILE_BYTES / 1024) + ' KB).'); return out; }
     var data;
-    try { data = JSON.parse(String(text || '').replace(/^﻿/, '')); } catch (e) { return { preset: null, errors: ['This file is not valid JSON.'] }; }
-    var p = data && data.type === FILE_TYPE ? data.preset : data;
-    if (data && data.type && data.type !== FILE_TYPE) return { preset: null, errors: ['This is not a basket preset file.'] };
-    if (!p || typeof p !== 'object' || !Array.isArray(p.groups)) return { preset: null, errors: ['This file has no preset in it (no "groups" list).'] };
+    try { data = JSON.parse(text.replace(/^﻿/, '')); } catch (e) { out.errors.push('This file is not valid JSON.'); return out; }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) { out.errors.push('This file has no preset in it.'); return out; }
+    var p = data;
+    if ('type' in data) {
+      if (data.type !== FILE_TYPE) { out.errors.push('This is not a basket preset file.'); return out; }
+      if (data.version !== FILE_VERSION) { out.errors.push('This preset file is version ' + JSON.stringify(data.version) + '; this app reads version ' + FILE_VERSION + '.'); return out; }
+      Object.keys(data).forEach(function (k) { if (['type', 'version', 'preset'].indexOf(k) < 0) out.warnings.push('ignored "' + k + '"'); });
+      p = data.preset;
+    }
+    if (!p || typeof p !== 'object' || !Array.isArray(p.groups)) { out.errors.push('This file has no preset in it (no "groups" list).'); return out; }
+    Object.keys(p).forEach(function (k) { if (['name', 'colours', 'groups', 'id'].indexOf(k) < 0) out.warnings.push('ignored "' + k + '"'); });
+    var errs = check(p);
+    if (errs.length) { out.errors = errs.slice(0, 10).concat(errs.length > 10 ? ['…and ' + (errs.length - 10) + ' more problems.'] : []); return out; }
+    p.groups.forEach(function (g, i) { Object.keys(g).forEach(function (k) { if (k !== 'label' && k !== 'baskets') out.warnings.push('ignored "' + k + '" in group ' + (i + 1)); }); });
     var t = tidy({ id: '', name: p.name, colours: p.colours, groups: p.groups });
-    var errors = check(t);
-    return { preset: errors.length ? null : t, errors: errors };
+    if (t.colours.length < p.colours.length) out.warnings.push('dropped ' + (p.colours.length - t.colours.length) + ' unused colour(s)');
+    out.preset = t;
+    return out;
   }
 
   return { check: check, tidy: tidy, toFile: toFile, fromFile: fromFile, slug: slug,
-    COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_BASKETS: MAX_BASKETS, FILE_TYPE: FILE_TYPE };
+    COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
+    MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });
