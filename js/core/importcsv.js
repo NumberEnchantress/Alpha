@@ -110,9 +110,8 @@
      fields from the first row, or a later line inside it holds an NDC (so
      other rows were swallowed), or the file has one column (robot lists).
      Every record comes back with the line it starts on and ends on. */
-  var NDC_INSIDE = /\d{4,5}[- ]\d{3,4}[- ]\d{1,2}|\d{11}/;
   var QUOTE_PROBLEM = 'a quote on this line is not closed or is out of place, so it cannot be known where this row ends and the next rows begin';
-  var SWALLOWED = 'a quoted field that starts on this line runs over several lines and takes in what look like other rows (a quote is probably missing or extra)';
+  var SWALLOWED = 'a value that starts on this line runs over several lines. That is a line break inside a cell (Alt+Enter in Excel) or a quote that is not closed, and the two cannot be told apart safely. In Excel, Find and Replace (Ctrl+H) can replace line breaks (type Ctrl+J in Find what) with a space';
   function lines(text) {
     // Byte-order marks are dropped wherever they are (two exports pasted together).
     var t = String(text || '').replace(/﻿/g, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
@@ -122,17 +121,12 @@
       var cur = r.meta.cursor, cells = r.data;
       var inner = cells.join('').split('\n').length - 1;
       var quoteErr = (r.errors || []).some(function (e) { return e.type === 'Quotes'; });
-      // A stray quote that swallows rows leaves a record whose field count is
-      // off, or, when the count happens to come out right (it closes in the
-      // same column of a later row), a field holding at least a whole row's
-      // worth of delimiters (header fields - 1). So a field with line breaks is
-      // refused when its record has a different field count, when it holds
-      // that many delimiters or an NDC anywhere, or when the file has one column.
-      var swallowed = inner > 0 && expected != null && (expected === 1 || cells.length !== expected || cells.some(function (c) {
-        c = String(c);
-        if (c.indexOf('\n') < 0) return false;
-        return NDC_INSIDE.test(c) || c.split(delim).length - 1 >= expected - 1;
-      }));
+      // A value that runs over several lines is either a line break typed
+      // inside a cell (Alt+Enter in Excel) or a quote that was never closed and
+      // swallowed the rows after it. The two cannot be told apart safely (a
+      // swallowed row can leave every count looking right), so either refuses
+      // the file.
+      var swallowed = inner > 0;
       if (quoteErr || swallowed) {
         problem = { line: l, why: quoteErr ? QUOTE_PROBLEM : SWALLOWED };
         parser.abort();
@@ -277,7 +271,12 @@
     ['ndc', 'drug', 'location', 'shelf'].forEach(function (c) { if (!m[c]) report.columns.missing.push(c); });
     var none = p.rows.length === 1 ? 'the 1 row (line ' + p.rows[0].line + ') was not imported.'
       : 'none of the ' + p.rows.length + ' rows (lines ' + p.rows[0].line + '-' + p.rows[p.rows.length - 1].line + ') were imported.';
-    if (!m.ndc) return stop('No NDC column found (expected a header such as "NDC"), so ' + none);
+    if (!m.ndc) {
+      var at = null;
+      p.rows.slice(0, 10).forEach(function (r) { if (!at && r.cells.some(function (c) { return COLUMNS.ndc.indexOf(key(c)) >= 0; })) at = r.line; });
+      return stop('No NDC column found (expected a header such as "NDC"), so ' + none +
+        (at ? ' The header seems to be on line ' + at + ': remove the line' + (at - p.headLine > 1 ? 's' : '') + ' above it (a title, for example) and import again.' : ''));
+    }
     if (!m.drug) return stop('No drug name column found (expected a header such as "Drug", "Description" or "Item description"), so ' + none);
 
     // A "Unit" column holding units of measure (EA, BX, ...) is not about shelving units.
@@ -304,7 +303,11 @@
     // what an unquoted ", " inside text leaves behind ("AMOXICILLIN, CLAV..."
     // split in two). A column where most rows (of 3 or more) start with a
     // space, as in files written "a, b, c", is not checked.
+    var cellsAfterFirst = 0, spacedCells = 0;
+    p.rows.forEach(function (r) { for (var j = 1; j < r.cells.length; j++) { var c = String(r.cells[j] == null ? '' : r.cells[j]); if (c.trim()) { cellsAfterFirst++; if (/^\s/.test(c)) spacedCells++; } } });
+    var commaSpace = spacedCells * 2 > cellsAfterFirst; // the whole file is written with ", "
     var spaced = p.fields.map(function (f, i) {
+      if (commaSpace) return false;
       var n = 0; p.rows.forEach(function (r) { if (/^\s+\S/.test(String(r.cells[i] == null ? '' : r.cells[i]))) n++; });
       return i > 0 && !(p.rows.length >= 3 && n * 2 > p.rows.length);
     });
@@ -506,6 +509,21 @@
       }
       report.matched++;
     }
+    // All or nothing: a robot list replaces the one in use, so a list with
+    // lines that cannot be read (an NDC lost to scientific notation, say), or
+    // with no NDC that matches a product, would drop NDCs from the robot.
+    // Such a list is not used, and what it changed is undone.
+    var unreadable = report.skipped.filter(function (x) { return !/^duplicate of line/.test(x.reason); });
+    if (unreadable.length || !report.matched) {
+      restoreRobot(products, report.prior);
+      report.fatal = true; report.matched = 0; report.movedToRobot = 0; report.prior = {};
+      report.notes = report.notes.filter(function (n) { return /Excel|read as a header line/.test(n.note); }); // notes about changes no longer apply
+      report.problem = unreadable.length
+        ? 'Nothing was used from this list: ' + unreadable.length + ' line' + (unreadable.length > 1 ? 's' : '') + ' could not be read (listed below). A robot list replaces the one in use, so an incomplete list would drop NDCs from the robot. Fix those lines and import again; until then the data in use stays as it is.'
+        : 'Nothing was used from this list: none of its NDCs is in the product list. Check that it is the right file; the data in use stays as it is.';
+      return report;
+    }
+    report.ndcs = Object.keys(seen);
     // Products marked robot in their own file but missing from the robot list.
     products.forEach(function (p) {
       if (p.robot === true && !seen[p.ndc]) {
@@ -535,8 +553,8 @@
     opts = opts || {};
     return {
       meta: { id: 'imported', name: (base.layout.name || 'Pharmacy') + (opts.productsAreSample ? ' + robot list' : ' + imported products'),
-        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && base.meta.sample), source: source || 'CSV import',
-        robotPrior: opts.robotPrior || undefined },
+        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && (base.meta.layoutIsSample || base.meta.sample)), source: source || 'CSV import',
+        robotPrior: opts.robotPrior || undefined, robotList: opts.robotList || undefined },
       layout: base.layout, products: products, rules: base.rules, basketSchemes: base.basketSchemes,
       groupLabels: base.groupLabels || []
     };

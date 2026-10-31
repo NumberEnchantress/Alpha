@@ -18,7 +18,7 @@
   function dataset() {
     var s = saved(), b = base();
     if (!s || !b || !Array.isArray(s.products)) return null;
-    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source, { productsAreSample: !!s.productsAreSample, robotPrior: s.robotPrior });
+    var ds = Alpha.importcsv.buildDataset(b, s.products, s.source, { productsAreSample: !!s.productsAreSample, robotPrior: s.robotPrior, robotList: s.robotList });
     ds.meta.importedAt = s.when;
     return ds;
   }
@@ -64,7 +64,9 @@
   // changes nothing: the data in use stays as it was, and the report says why.
   function run(pf, rf) {
     var cur = Alpha.state.ds, layout = (base() || cur).layout, prev = saved();
-    var products, lineOf = null, productsSource = null, productsAreSample = false, robotPrior = null;
+    var products, lineOf = null, productsSource = null, productsAreSample = false, robotPrior = null, robotList = null;
+    // The robot list in use now: kept with the import, or in store.js.
+    var listInUse = prev ? prev.robotList : cur.meta && cur.meta.robotList;
     var report = { when: new Date().toLocaleString() };
     if (pf) {
       var res = Alpha.importcsv.importProducts(pf.text, layout);
@@ -76,14 +78,21 @@
       // undoing the robot list applied before (a new list replaces the old one).
       products = JSON.parse(JSON.stringify(prev && Array.isArray(prev.products) ? prev.products : cur.products));
       if (prev) { Alpha.importcsv.restoreRobot(products, prev.robotPrior); lineOf = prev.lineOf || null; productsSource = prev.productsSource || null; productsAreSample = !!prev.productsAreSample; }
+      // (a robot list replaces listInUse below)
       else { Alpha.importcsv.restoreRobot(products, cur.meta.robotPrior); productsAreSample = !!cur.meta.sample; } // store.js keeps what its robot list changed
     }
     var productsOk = !pf || (!report.products.fatal && report.products.imported > 0);
     if (rf && productsOk) {
       report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf });
       report.robotFile = rf.name; report.robotEncoding = { encoding: rf.encoding, note: rf.note };
-      if (!report.robot.fatal) robotPrior = report.robot.prior;
+      if (!report.robot.fatal) { robotPrior = report.robot.prior; robotList = { source: rf.name, ndcs: report.robot.ndcs }; }
     } else if (rf) report.robotNotUsed = rf.name + ' was not used, because the products file was not imported.';
+    else if (pf && productsOk && listInUse && listInUse.ndcs && listInUse.ndcs.length) {
+      // A new products file alone: the robot list in use is applied to it again.
+      var again = Alpha.importcsv.applyRobotList('NDC\n' + listInUse.ndcs.map(Alpha.ndc.format).join('\n') + '\n', products, layout, { preferred: true, lineOf: lineOf });
+      if (!again.fatal) { report.robot = again; report.robotFile = listInUse.source + ' (the robot list in use, applied again)'; robotPrior = again.prior; robotList = listInUse; }
+      else report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so it was not applied; import a robot list again if needed.';
+    }
     var robotOk = !rf || (report.robot && !report.robot.fatal);
     // All or nothing: if either file was refused, neither is used.
     var changed = productsOk && robotOk;
@@ -91,7 +100,7 @@
     if (changed) {
       var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
-        productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior });
+        productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior, robotList: robotList });
       report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
     } else {
       report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
@@ -114,6 +123,7 @@
     var out = JSON.parse(JSON.stringify(ds));
     out.meta = { id: 'real', name: 'Store data' + (ds.meta.source ? ' from ' + ds.meta.source : ''), sample: !!ds.meta.sample, layoutIsSample: !!ds.meta.layoutIsSample, source: ds.meta.source || '' };
     if (ds.meta.robotPrior) out.meta.robotPrior = ds.meta.robotPrior; // so a later robot list can replace this one
+    if (ds.meta.robotList) out.meta.robotList = ds.meta.robotList; // and a later products file gets it again
     var text = '/* Store data for Alpha. PRIVATE: keep it out of any public repository. */\n' +
       '(window.ALPHA_DATASETS = window.ALPHA_DATASETS || {}).real = ' + JSON.stringify(out) + ';\n';
     var a = document.createElement('a');
@@ -170,7 +180,8 @@
   function reportHtml(rep) {
     if (!rep) return '';
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>' +
-      (rep.robotNotUsed ? '<p class="note-bad" data-testid="not-applied">' + esc(rep.robotNotUsed) + '</p>' : '');
+      (rep.robotNotUsed ? '<p class="note-bad" data-testid="not-applied">' + esc(rep.robotNotUsed) + '</p>' : '') +
+      (rep.robotAgainNote ? '<p class="note-warn small">' + esc(rep.robotAgainNote) + '</p>' : '');
     if (rep.products) {
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
@@ -192,7 +203,10 @@
     if (rep.robot) {
       var r = rep.robot;
       if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
-      if (r.fatal) return h + encodingNote(rep.robotEncoding) + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
+      if (r.fatal) {
+        var bad = r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; });
+        return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
+      }
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
         encodingNote(rep.robotEncoding);

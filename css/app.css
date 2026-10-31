@@ -85,7 +85,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .warning.danger { background: var(--danger-bg); border-color: var(--danger-line); }
 .warning.info { background: var(--info-bg); border-color: var(--info-line); }
 .warning .btn { margin-top: .25rem; font-size: .9rem; }
-.i-section { margin: .6rem 0 .2rem; font-size: .95rem; color: var(--muted); border-top: 1px solid #ddd; padding-top: .4rem; }
+.i-section { margin: .6rem 0 .2rem; font-size: .95rem; color: var(--muted); border-top: 1px solid #ddd; padding-top: .4rem; overflow-wrap: anywhere; }
+.dialog { overflow-wrap: anywhere; }
 .notes { background: #f3f3f3; padding: .3rem .45rem; border-radius: 4px; }
 
 /* Baskets */
@@ -95,6 +96,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 
 /* Map and shelf view */
 .map, .elev { flex: 1; min-height: 0; position: relative; }
+.map { overflow: auto; } /* the map has a smallest size (map.js) and scrolls below it */
 .map svg, .elev svg { width: 100%; height: 100%; display: block; }
 .elev { display: flex; flex-direction: column; overflow-y: auto; }
 .elev-head { padding: .45rem .6rem .2rem; }
@@ -138,8 +140,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 @media (max-width: 1100px) {
   body { overflow-y: auto; }
   .grid { flex: 1 0 auto; }
-  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) clamp(18rem, 40vw, 24rem); grid-template-rows: minmax(330px, 33fr) minmax(350px, 35fr); grid-template-areas: "map side" "elev side"; }
-  .grid:not(.has-elev) { grid-template-rows: minmax(330px, 1fr) 0; }
+  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) clamp(18rem, 40vw, 24rem); grid-template-rows: minmax(430px, 43fr) minmax(390px, 39fr); grid-template-areas: "map side" "elev side"; }
+  .grid:not(.has-elev) { grid-template-rows: minmax(430px, 1fr) 0; }
   .grid .pane-map { grid-area: map; }
   .grid .pane-side { grid-area: side; position: sticky; top: .5rem; align-self: start; height: calc(100vh - 4.2rem); max-height: 100%; }
   .grid.has-elev .pane-elev { grid-area: elev; }
@@ -160,9 +162,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .grid, .grid.has-elev { display: flex; flex-direction: column; }
   .grid .pane { contain: layout paint; flex: none; }
   .grid .pane-side { order: -1; position: static; height: auto; min-height: 60vh; }
-  .pane-map { height: 340px; }
-  .pane-map .map { overflow-x: auto; }
-  .pane-map .map svg { min-width: 430px; }
+  .pane-map { height: 440px; }
   .grid.has-elev .pane-elev { display: flex; }
   .elev { display: flex; }
   .elev > .elev-draw { min-height: 20rem; }
@@ -195,7 +195,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Settings */
 .dialog fieldset { border: 1px solid #bbb; border-radius: 6px; margin: 0 0 .8rem; padding: .4rem .7rem .6rem; }
 .dialog legend { font-weight: 700; padding: 0 .3rem; }
-.opt { display: block; padding: .2rem 0; }
+.opt { display: block; padding: .2rem 0; overflow-wrap: anywhere; }
 .opt.inline { display: inline-block; margin-right: 1rem; }
 .opt input { width: 1.1rem; height: 1.1rem; vertical-align: -2px; }
 .muted { color: var(--muted); }

@@ -49,16 +49,37 @@
     return s + '</svg>';
   }
 
+  // Text drawn on the shelf is at least this many screen pixels; a label
+  // that would be smaller goes in the caption instead (as normal text).
+  var MIN_PX = 11;
+  // Screen pixels per drawing unit, from a ResizeObserver (no layout read
+  // while typing). Unknown until the first observation: then the label is
+  // drawn, and checked again as soon as the size is known.
+  var last = null;
+  var ro = window.ResizeObserver ? new ResizeObserver(function (entries) {
+    entries.forEach(function (e) {
+      var vb = e.target.viewBox && e.target.viewBox.baseVal;
+      if (vb && vb.width && vb.height) e.target.__scale = Math.min(e.contentRect.width / vb.width, e.contentRect.height / vb.height);
+    });
+    if (last && last.svg.__scale && last.el.contains(last.svg)) place(last);
+  }) : null;
+  function place(st) {
+    var shown = mark(st.svg, st.loc, st.p);
+    var cap = st.el.querySelector('.elev-caption'), c = caption(st.loc);
+    if (cap) cap.textContent = (shown || st.loc.shelf == null ? '' : st.p.drug + (st.p.strength ? ' ' + st.p.strength : '') + ': ') + c.text;
+  }
+
   // Highlights the shelf and writes the drug (and ESTIMATED) on it.
+  // Returns false when the label would be under MIN_PX and was left off.
   function mark(svg, loc, p) {
     var old = svg.querySelectorAll('.shelf-hi, .shelf-est');
     for (var i = 0; i < old.length; i++) old[i].classList.remove('shelf-hi', 'shelf-est');
     var labels = svg.querySelectorAll('.s-label, .s-est');
     for (var j = 0; j < labels.length; j++) labels[j].parentNode.removeChild(labels[j]);
     svg.setAttribute('aria-label', svg.getAttribute('data-base-label') + (loc.shelf == null ? '. Shelf unknown' : ''));
-    if (loc.shelf == null) return;
+    if (loc.shelf == null) return true;
     var g = svg.querySelector('.shelf[data-shelf="' + loc.shelf + '"]');
-    if (!g) return;
+    if (!g) return true;
     var est = loc.shelfStatus === 'estimated';
     g.classList.add(est ? 'shelf-est' : 'shelf-hi');
     // Two lines, so the strength is never cut off: drug, then strength.
@@ -67,9 +88,13 @@
     // Both lines share one size that fits the row height and the shelf width (80 units).
     var widest = Math.max(line1.length, line2.length, 8);
     var fs = Math.min(5.6, h * 0.4, 80 / (widest * 0.7)); // bold text is about 0.7em per character
-    g.appendChild(text('s-label', y + h / 2 - fs * 0.55, fs, line1));
-    g.appendChild(text(est ? 's-est' : 's-label', y + h / 2 + fs * 0.6, fs, line2));
+    var shown = !svg.__scale || fs * svg.__scale >= MIN_PX;
+    if (shown) {
+      g.appendChild(text('s-label', y + h / 2 - fs * 0.55, fs, line1));
+      g.appendChild(text(est ? 's-est' : 's-label', y + h / 2 + fs * 0.6, fs, line2));
+    }
     svg.setAttribute('aria-label', svg.getAttribute('data-base-label') + '. Highlighted: shelf ' + loc.shelf + (est ? ', estimated' : ''));
+    return shown;
   }
   function text(cls, y, size, content) {
     var t = document.createElementNS(Alpha.ui.SVGNS, 'text');
@@ -114,8 +139,16 @@
     el.innerHTML = header(loc) + strip(loc) + '<div class="elev-draw"></div><p class="elev-caption ' + c.cls + '">' + esc(c.text) + '</p>';
     var box = el.querySelector('.elev-draw');
     if (draw) box.appendChild(draw);
-    else { box.innerHTML = drawing(loc); cache = { unit: loc.unit, node: box.firstChild }; }
-    mark(cache.node, loc, p);
+    else {
+      box.innerHTML = drawing(loc); cache = { unit: loc.unit, node: box.firstChild };
+      if (ro) ro.observe(cache.node);
+      // A new drawing: read its scale once now (one layout read per unit
+      // change, not per keystroke), so a label is never drawn too small.
+      var r = cache.node.getBoundingClientRect(), vb = cache.node.viewBox.baseVal;
+      if (r.width && r.height && vb.width && vb.height) cache.node.__scale = Math.min(r.width / vb.width, r.height / vb.height);
+    }
+    last = { svg: cache.node, loc: loc, p: p, el: el };
+    place(last);
   }
   var cache = null;
 

@@ -12,7 +12,7 @@
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
 
   var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
-  var saved = true, usable = true, unreadable = false, backupKey = null, hooks = {}, dlg = null;
+  var saved = true, usable = true, unreadable = false, backupKey = null, notice = null, hooks = {}, dlg = null;
 
   // Saved settings that cannot be read (or hold values of the wrong kind) are
   // never written over unasked: a copy is kept first, under the first free
@@ -20,8 +20,12 @@
   // twice). If no copy can be kept, settings are not saved at all, so the
   // original stays. The defaults are used and the page says so.
   function wrongKinds(p) {
-    return ('scheme' in p && p.scheme !== null && typeof p.scheme !== 'string') || ('scale' in p && typeof p.scale !== 'string') ||
-      ('disabled' in p && (typeof p.disabled !== 'object' || p.disabled === null || Array.isArray(p.disabled))) || ('custom' in p && !Array.isArray(p.custom));
+    var plain = function (o) { return !!o && typeof o === 'object' && !Array.isArray(o); };
+    return ('scheme' in p && p.scheme !== null && typeof p.scheme !== 'string') ||
+      ('scale' in p && !SCALES.some(function (x) { return x[0] === p.scale; })) ||
+      ('disabled' in p && !plain(p.disabled)) ||
+      // each custom rule must be a rule: an object with a text id, a message and a condition
+      ('custom' in p && (!Array.isArray(p.custom) || !p.custom.every(function (r) { return plain(r) && typeof r.id === 'string' && r.id && typeof r.message === 'string' && plain(r.when); })));
   }
   function keepCopy(raw) {
     for (var i = 1; i <= 20; i++) {
@@ -61,12 +65,27 @@
     for (var i = 0; i < list.length; i++) if (list[i].id === prefs.scheme) return list[i];
     return list[0] || null;
   }
-  function useScheme(id) { prefs.scheme = id; save(); changed(); }
+  function useScheme(id) { prefs.scheme = id; notice = null; save(); changed(); }
+  // Rebuild the open dialog after a change in another window, keeping focus.
+  function rebuildKeepingFocus() {
+    var a = document.activeElement, sel = null;
+    if (a && dlg.contains(a)) {
+      if (a.id) sel = '#' + CSS.escape(a.id);
+      else if (a.name) sel = '[name="' + CSS.escape(a.name) + '"][value="' + CSS.escape(a.value) + '"]';
+      else if (a.getAttribute('data-rule')) sel = '[data-rule="' + CSS.escape(a.getAttribute('data-rule')) + '"]';
+      else if (a.getAttribute('data-del')) sel = '[data-del="' + CSS.escape(a.getAttribute('data-del')) + '"]';
+    }
+    build();
+    var back = null;
+    try { back = sel && dlg.querySelector(sel); } catch (e) { back = null; }
+    if (back) back.focus();
+  }
   // When the chosen preset cannot be found, say so instead of quietly showing another.
   function schemeProblem(ds) {
     var s = scheme(ds);
     if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). ' +
-      (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (storage full), so they are left as they are and changes are not saved.') + ' Check Settings.';
+      (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (the storage is full, or 20 earlier copies are already kept), so they are left as they are and changes are not saved.') + ' Check Settings.';
+    if (notice) return notice;
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
   }
@@ -98,7 +117,7 @@
     else if (!saved) h += '<p class="note-bad">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
     if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. ' +
       (backupKey ? 'A copy of them was kept in this browser as alpha.' + esc(backupKey) + '; the next change you make here replaces the unreadable settings.'
-        : 'No copy could be kept (the storage in this browser is full), so they are left as they are and changes made here are not saved.') + '</p>';
+        : 'No copy could be kept (the storage in this browser is full, or 20 earlier copies are already kept), so they are left as they are and changes made here are not saved.') + '</p>';
 
     var builtIns = {};
     (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });
@@ -208,8 +227,15 @@
     // Settings changed in another window: take them, so an older window does
     // not later save its stale copy over them.
     window.addEventListener('storage', function (e) {
-      if (e.key === 'alpha.prefs') { load(); changed(); if (dlg.open) build(); }
-      else if (e.key && e.key.indexOf('alpha.preset.') === 0 && dlg.open) build();
+      if (e.key === 'alpha.prefs') {
+        var was = prefs.scheme; load();
+        // The preset in use was deleted in the other window: say so here too.
+        if (was && was !== prefs.scheme && !(Alpha.presetsUI && Alpha.presetsUI.find(Alpha.state.ds, was))) {
+          var now = scheme(Alpha.state.ds); notice = 'The basket preset in use was deleted in another window; now using "' + (now ? now.name : '') + '".';
+        }
+        changed(); if (dlg.open) rebuildKeepingFocus();
+      }
+      else if (e.key && e.key.indexOf('alpha.preset.') === 0 && dlg.open) rebuildKeepingFocus();
     });
   }
 
