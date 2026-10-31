@@ -27,9 +27,9 @@
     return ['20', '40', '60'].map(function (k) { return k + ' dr: ' + show(v[k]); }).join(' · ');
   }
 
-  function basketKey(scheme) {
+  function basketKey(scheme, problem) {
     if (!scheme) return '';
-    var colours = {};
+    var colours = Object.create(null);
     scheme.colours.forEach(function (c) { colours[c.id] = c; });
     var items = scheme.groups.map(function (g) {
       var sw = g.baskets.map(function (b) {
@@ -40,7 +40,9 @@
       var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
       return '<li><strong>' + esc(g.label) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
     }).join('');
-    return '<h3 class="i-section">Baskets · ' + esc(scheme.name) + '</h3><ul class="baskets" aria-label="Basket groups">' + items + '</ul>';
+    return '<h3 class="i-section">Baskets · ' + esc(scheme.name) + '</h3>' +
+      (problem ? '<p class="warning warn" role="alert"><span class="sev">Warning</span>' + esc(problem) + '</p>' : '') +
+      '<ul class="baskets" aria-label="Basket groups">' + items + '</ul>';
   }
 
   function warningsHtml(warnings) {
@@ -79,7 +81,7 @@
   }
 
   // The basket key only changes with the scheme, so it is rendered apart.
-  function renderBaskets(el, scheme) { el.innerHTML = basketKey(scheme); }
+  function renderBaskets(el, scheme, problem) { el.innerHTML = basketKey(scheme, problem); }
 
   Alpha.info = { render: render, renderBaskets: renderBaskets, whereText: whereText };
 })(window.Alpha);

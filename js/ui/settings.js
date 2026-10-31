@@ -34,6 +34,12 @@
     return list[0] || null;
   }
   function useScheme(id) { prefs.scheme = id; save(); changed(); }
+  // When the chosen preset cannot be found, say so instead of quietly showing another.
+  function schemeProblem(ds) {
+    var s = scheme(ds);
+    if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
+    return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
+  }
   function disabledRules() { return prefs.disabled; }
   function customRules() { return prefs.custom; }
 
@@ -170,7 +176,7 @@
   load();
   applyScale();
   Alpha.settings = {
-    init: init, open: open, scheme: scheme, useScheme: useScheme, notify: changed, disabledRules: disabledRules, customRules: customRules,
+    init: init, open: open, scheme: scheme, schemeProblem: schemeProblem, useScheme: useScheme, notify: changed, disabledRules: disabledRules, customRules: customRules,
     importedDataset: function () { return Alpha.importer ? Alpha.importer.dataset() : null; },
     reload: function () { if (hooks.reload) hooks.reload(); }
   };
