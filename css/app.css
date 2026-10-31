@@ -130,9 +130,20 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .dialog h2 { margin-top: 0; }
 .keys td { padding: .2rem .6rem .2rem 0; }
 
+/* Narrower windows (a half-screen window, a small laptop): the shelf view
+   goes under the map instead of beside it, with its text beside the drawing. */
 @media (max-width: 1100px) {
-  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) 24rem; }
-  .grid.has-elev .pane-elev { display: none; }
+  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) 24rem; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "map side" "elev side"; }
+  .grid .pane-map { grid-area: map; }
+  .grid .pane-side { grid-area: side; }
+  .grid.has-elev .pane-elev { grid-area: elev; }
+  /* The unit name heads the shelf view here; the pane title stays for screen readers. */
+  .pane-elev > .pane-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .grid:not(.has-elev) .pane-map { grid-row: 1 / 3; }
+  .elev { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; align-content: start; }
+  .elev > * { grid-column: 1; }
+  .elev > .elev-draw { grid-column: 2; grid-row: 1 / 5; min-height: 0; }
+  .elev > .elev-caption { grid-row: 4; border-top: 0; }
 }
 @media (max-width: 760px) {
   body { overflow: auto; }
@@ -140,6 +151,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .pane-side { order: -1; }
   .pane-map { min-height: 50vh; }
   .grid.has-elev .pane-elev { display: flex; min-height: 50vh; }
+  .elev { display: flex; }
+  .elev > .elev-draw { min-height: 12rem; }
 }
 
 /* Map drawing. Strokes are screen pixels (non-scaling), so they look the same on any floor size. */
