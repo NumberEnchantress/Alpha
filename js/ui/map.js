@@ -9,7 +9,7 @@
 (function (Alpha) {
   'use strict';
   var esc = Alpha.ui.esc;
-  var minFont = Infinity, minW = 0, minH = 0, mapRO = null, box = null;
+  var minFont = Infinity, minW = 0, minH = 0, mapRO = null, box = null, focus = null;
   var el = null, svg = null, layout = null, marker = null, markerEst = null, markerRing = null, title = null, lastHi = [];
   var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
 
@@ -26,15 +26,20 @@
     var byW = w / Math.max(2.2, text.length * 0.6), byH = h * 0.7;
     return Math.max(2 * k, Math.min(3.6 * k, byW, byH));
   }
+  // The space a label takes (bold text is about 0.62 em a character); a
+  // label can be wider than its box, and the EST. tag must not cover it.
+  var textBoxes = [];
   function label(r, text) {
     var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text);
     if (f < minFont) minFont = f;
+    var tw = String(text).length * 0.62 * f, th = f * 1.15, v = vertical(r);
+    textBoxes.push({ x: cx - (v ? th : tw) / 2, y: cy - (v ? tw : th) / 2, w: v ? th : tw, h: v ? tw : th });
     return '<text x="' + cx + '" y="' + cy + '" font-size="' + f + '"' +
       (vertical(r) ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '') + '>' + esc(text) + '</text>';
   }
 
   function init(container, lay) {
-    el = container; layout = lay; minFont = Infinity;
+    el = container; layout = lay; minFont = Infinity; textBoxes = [];
     title = document.getElementById('map-title');
     var W = lay.width, D = lay.depth, parts = [];
     k = Math.max(W, D) / 100;
@@ -76,7 +81,7 @@
     minW = (W + 2 * k) * per; minH = (D + 2 * k) * per;
     svg.style.minWidth = Math.ceil(minW) + 'px'; svg.style.minHeight = Math.ceil(minH) + 'px';
     if (window.ResizeObserver && !mapRO) {
-      mapRO = new ResizeObserver(function (en) { var r = en[0].contentRect; box = { w: r.width, h: r.height }; });
+      mapRO = new ResizeObserver(function (en) { var r = en[0].contentRect; box = { w: r.width, h: r.height }; keepInView(); }); // also after a resize
       mapRO.observe(el);
     }
   }
@@ -111,6 +116,7 @@
     markerEst.setAttribute('visibility', 'hidden');
     markerRing.setAttribute('visibility', 'hidden');
     if (!loc || !loc.location) {
+      focus = null;
       title.textContent = !loc ? 'Floor map' : loc.code != null ? 'Floor map · ' + loc.code + ' is not on the map yet' : 'Floor map · location unknown';
       return;
     }
@@ -132,6 +138,10 @@
     }
     title.textContent = 'Floor map · ' + where;
     svg.setAttribute('aria-label', 'Floor map of ' + layout.name + '. Highlighted: ' + where);
+    // What to keep in view when the map scrolls: the marker (below), or else the middle of the location.
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    L.units.forEach(function (u) { x0 = Math.min(x0, u.rect.x); x1 = Math.max(x1, u.rect.x + u.rect.w); y0 = Math.min(y0, u.rect.y); y1 = Math.max(y1, u.rect.y + u.rect.h); });
+    focus = [(x0 + x1) / 2, (y0 + y1) / 2];
     if (loc.unit) {
       var p = standPoint(loc.unit);
       if (p) {
@@ -144,10 +154,12 @@
             markerEst.setAttribute('visibility', 'visible');
           } else markerRing.setAttribute('visibility', 'visible'); // no free spot: a dashed ring says "estimated"
         }
-        if (box && (box.w < minW - 1 || box.h < minH - 1)) scrollTo(p);
+        focus = p;
       }
     }
+    keepInView();
   }
+  function keepInView() { if (focus && box && (box.w < minW - 1 || box.h < minH - 1)) scrollTo(focus); }
 
   // When the pane is smaller than the map's smallest size, it scrolls: bring
   // the marker to the middle. Sizes come from the ResizeObserver, so this
@@ -176,6 +188,7 @@
     var boxes = [];
     layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(u.rect); }); });
     (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
+    boxes = boxes.concat(textBoxes); // labels can be wider than their boxes
     var hw = (TAG_W / 2 + TAG_PAD) * k, hh = (TAG_H / 2 + TAG_PAD) * k;
     for (var i = 0; i < TAG_SPOTS.length; i++) {
       var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k;

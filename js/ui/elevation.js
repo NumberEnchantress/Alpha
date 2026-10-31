@@ -140,12 +140,12 @@
     var box = el.querySelector('.elev-draw');
     if (draw) box.appendChild(draw);
     else {
+      // A new drawing. Its scale comes from the ResizeObserver after layout
+      // (no layout read while typing); until then the label is drawn, and it
+      // moves to the caption a frame later if it turns out under MIN_PX.
+      if (ro && cache) ro.unobserve(cache.node);
       box.innerHTML = drawing(loc); cache = { unit: loc.unit, node: box.firstChild };
       if (ro) ro.observe(cache.node);
-      // A new drawing: read its scale once now (one layout read per unit
-      // change, not per keystroke), so a label is never drawn too small.
-      var r = cache.node.getBoundingClientRect(), vb = cache.node.viewBox.baseVal;
-      if (r.width && r.height && vb.width && vb.height) cache.node.__scale = Math.min(r.width / vb.width, r.height / vb.height);
     }
     last = { svg: cache.node, loc: loc, p: p, el: el };
     place(last);
