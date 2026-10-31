@@ -52,26 +52,50 @@
     Promise.all([readFile(prodIn), readFile(robotIn)]).then(function (files) {
       var pf = files[0], rf = files[1];
       if (!pf && !rf) { status.textContent = 'Choose a products CSV, a robot list, or both.'; return; }
-      var cur = Alpha.state.ds, layout = (base() || cur).layout;
-      var products, lineOf = null, report = { when: new Date().toLocaleString() };
-      if (pf) {
-        var res = Alpha.importcsv.importProducts(pf.text, layout);
-        products = res.products; lineOf = res.lineOf; report.products = res.report; report.productsFile = pf.name;
-        report.productsEncoding = { encoding: pf.encoding, note: pf.note };
-      } else {
-        // Robot list only: apply it to a copy of the products in use now.
-        products = JSON.parse(JSON.stringify(cur.products));
-      }
-      if (rf) { report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf }); report.robotFile = rf.name; report.robotEncoding = { encoding: rf.encoding, note: rf.note }; }
-      var source = [pf && pf.name, rf && rf.name].filter(Boolean).join(' + ');
-      var ok = keep({ products: products, source: source, when: report.when, productsAreSample: !pf && !!cur.meta.sample });
-      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
-      lastReport = report;
-      store.set('importReport', report);
-      Alpha.settings.reload();
-      Alpha.settings.open(); // rebuild the dialog with the new data and the report
-      focusReport();
+      status.textContent = 'Importing… (a large file can take a few seconds)';
+      setTimeout(function () { run(pf, rf); }, 30); // let the status show before the work starts
     }).catch(function (e) { status.textContent = e.message; });
+  }
+
+  // Builds the import. A file that is refused, or that gives no products,
+  // changes nothing: the data in use stays as it was, and the report says why.
+  function run(pf, rf) {
+    var cur = Alpha.state.ds, layout = (base() || cur).layout, prev = saved();
+    var products, lineOf = null, productsSource = null, productsAreSample = false, robotPrior = null;
+    var report = { when: new Date().toLocaleString() };
+    if (pf) {
+      var res = Alpha.importcsv.importProducts(pf.text, layout);
+      products = res.products; lineOf = res.lineOf; productsSource = pf.name;
+      report.products = res.report; report.productsFile = pf.name;
+      report.productsEncoding = { encoding: pf.encoding, note: pf.note };
+    } else {
+      // Robot list only: apply it to a copy of the products in use now, after
+      // undoing the robot list applied before (a new list replaces the old one).
+      products = JSON.parse(JSON.stringify(prev && Array.isArray(prev.products) ? prev.products : cur.products));
+      if (prev) { Alpha.importcsv.restoreRobot(products, prev.robotPrior); lineOf = prev.lineOf || null; productsSource = prev.productsSource || null; productsAreSample = !!prev.productsAreSample; }
+      else productsAreSample = !!cur.meta.sample;
+    }
+    var productsOk = !pf || (!report.products.fatal && report.products.imported > 0);
+    if (rf && productsOk) {
+      report.robot = Alpha.importcsv.applyRobotList(rf.text, products, layout, { preferred: true, lineOf: lineOf });
+      report.robotFile = rf.name; report.robotEncoding = { encoding: rf.encoding, note: rf.note };
+      if (!report.robot.fatal) robotPrior = report.robot.prior;
+    } else if (rf) report.robotNotUsed = rf.name + ' was not used, because the products file was not imported.';
+    var robotOk = !rf || (report.robot && !report.robot.fatal);
+    var changed = pf ? productsOk : robotOk;
+    if (changed) {
+      var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
+      var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
+        productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior });
+      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
+    } else {
+      report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
+    }
+    lastReport = report;
+    store.set('importReport', report);
+    Alpha.settings.reload();
+    Alpha.settings.open(); // rebuild the dialog with the new data and the report
+    focusReport();
   }
 
   function stop() {
@@ -93,11 +117,39 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
+  // Long tables show their first rows only (drawing thousands of rows freezes
+  // the page); the full report is one click away as a CSV file.
+  var SHOWN = 300;
   function table(rows, cols, empty) {
     if (!rows || !rows.length) return empty ? '<p class="small muted">' + empty + '</p>' : '';
     return '<table class="report small"><thead><tr>' + cols.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>' +
-      rows.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(r[c[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') +
-      '</tbody></table>';
+      rows.slice(0, SHOWN).map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(r[c[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') +
+      '</tbody></table>' +
+      (rows.length > SHOWN ? '<p class="small">Showing the first ' + SHOWN + ' of ' + rows.length + '. ' +
+        '<button type="button" class="btn small" data-act="report-csv">Download the full report (CSV)</button></p>' : '');
+  }
+
+  // Every entry of the last report, one per line: file, kind, line, NDC, text.
+  function downloadReport() {
+    var rep = lastReport, out = [['file', 'kind', 'line', 'ndc', 'text']];
+    if (!rep) return;
+    var q = function (v) { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    if (rep.products) {
+      if (rep.products.problem) out.push([rep.productsFile, 'problem', '', '', rep.products.problem]);
+      rep.products.skipped.forEach(function (s) { out.push([rep.productsFile, 'not imported', s.row, s.ndc, s.reason]); });
+      rep.products.notes.forEach(function (n) { out.push([rep.productsFile, 'note', n.row, n.ndc, n.note]); });
+    }
+    if (rep.robot) {
+      if (rep.robot.problem) out.push([rep.robotFile, 'problem', '', '', rep.robot.problem]);
+      rep.robot.notFound.forEach(function (x) { out.push([rep.robotFile, 'not in the product list', x.row, x.ndc, '']); });
+      rep.robot.skipped.forEach(function (x) { out.push([rep.robotFile, 'unusable', x.row, x.ndc, x.reason]); });
+      rep.robot.notes.forEach(function (x) { out.push([rep.robotFile, 'note', x.row, x.ndc, x.note]); });
+    }
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + out.map(function (r) { return r.map(q).join(','); }).join('\r\n') + '\r\n'], { type: 'text/csv' }));
+    a.download = 'import-report.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
   // Rows with at least one note (a row can have several notes).
@@ -114,19 +166,27 @@
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>';
     if (rep.products) {
       var p = rep.products, cols = p.columns;
-      if (p.problem) h += '<p class="note-bad">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
-      h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
-        p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>' +
-        encodingNote(rep.productsEncoding);
-      h += '<p class="small">Columns used: ' + Object.keys(cols.used).map(function (k) { return esc(k) + ' ← "' + esc(cols.used[k]) + '"'; }).join(', ') +
-        (cols.unused.length ? '. Ignored: ' + cols.unused.map(function (u) { return '"' + esc(u) + '"'; }).join(', ') : '') +
-        (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
-      h += '<h4>Rows not imported</h4>' + table(p.skipped, [['row', 'Line'], ['ndc', 'NDC'], ['reason', 'Why']], 'None.');
-      h += '<h4>Imported, with notes</h4>' + table(p.notes, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
+      if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
+      if (!p.fatal) {
+        h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
+          p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
+        if (!p.imported) h += '<p class="note-bad">No rows could be imported, so the data in use was not changed.</p>';
+      }
+      h += encodingNote(rep.productsEncoding) +
+        (p.fileNotes || []).map(function (n) { return '<p class="note-warn small">' + esc(n) + '</p>'; }).join('');
+      if (!p.fatal) {
+        h += '<p class="small">Columns used: ' + Object.keys(cols.used).map(function (k) { return esc(k) + ' ← "' + esc(cols.used[k]) + '"'; }).join(', ') +
+          (cols.unused.length ? '. Ignored: ' + cols.unused.map(function (u) { return '"' + esc(u) + '"'; }).join(', ') : '') +
+          (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
+        h += '<h4>Rows not imported</h4>' + table(p.skipped, [['row', 'Line'], ['ndc', 'NDC'], ['reason', 'Why']], 'None.');
+        h += '<h4>Imported, with notes</h4>' + table(p.notes, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
+      }
     }
+    if (rep.robotNotUsed) h += '<p class="note-bad">' + esc(rep.robotNotUsed) + '</p>';
     if (rep.robot) {
       var r = rep.robot;
-      if (r.problem) h += '<p class="note-bad">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
+      if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
+      if (r.fatal) return h + encodingNote(rep.robotEncoding) + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
         encodingNote(rep.robotEncoding);
@@ -158,6 +218,7 @@
     el.querySelector('#imp-go').addEventListener('click', function () { doImport(el); });
     var st = el.querySelector('#imp-stop');
     if (st) { st.addEventListener('click', stop); el.querySelector('#imp-dl').addEventListener('click', download); }
+    el.addEventListener('click', function (e) { if (e.target.closest('[data-act="report-csv"]')) downloadReport(); });
   }
 
   // After an import the dialog reopens; move focus to the report.

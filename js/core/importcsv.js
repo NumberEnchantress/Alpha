@@ -16,14 +16,14 @@
   // Accepted column names (compared without case, spaces or punctuation).
   var COLUMNS = {
     ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'nationaldrugcode'],
-    drug: ['drug', 'drugname', 'name', 'generic', 'genericname', 'description', 'product', 'productname'],
+    drug: ['drug', 'drugname', 'name', 'generic', 'genericname', 'description', 'product', 'productname', 'itemdescription', 'itemname', 'drugdescription', 'productdescription'],
     strength: ['strength', 'str', 'dose'],
     form: ['form', 'dosageform'],
     manufacturer: ['manufacturer', 'mfr', 'mfg', 'labeler', 'maker'],
-    location: ['location', 'loc', 'locationcode', 'bin'],
+    location: ['location', 'loc', 'locationcode', 'bin', 'binlocation', 'shelflocation', 'binno', 'binnumber'],
     unit: ['unit', 'face', 'fridge', 'section'],
     shelf: ['shelf', 'shelfnumber', 'shelfno'],
-    countPerBottle: ['countperbottle', 'count', 'packsize', 'packagesize', 'bottlesize', 'qtyperbottle'],
+    countPerBottle: ['countperbottle', 'count', 'packsize', 'packagesize', 'bottlesize', 'qtyperbottle', 'pkgsize', 'pksize', 'pkgqty', 'packqty'],
     niosh: ['niosh', 'hazardous', 'nioshhazardous'],
     safetyCap: ['safetycap', 'cap', 'safety'],
     vial20: ['vial20', '20dram', '20dr', 'dram20'],
@@ -36,11 +36,6 @@
   };
   var TRUE = ['yes', 'y', 'true', '1', 'x'], FALSE = ['no', 'n', 'false', '0'];
   var SCI = /^\d+(\.\d+)?e\+?\d+$/i;
-  // A line that starts like an NDC: inside a quoted field it means another record was swallowed.
-  var NDC_START = /^\s*"?(\d{4,5}-\d{3,4}-\d{1,2}|\d{10,12})\b/;
-  var BAD_QUOTE = 'a quote on this line is not closed or is misplaced, so the line could not be read; it was skipped and reading went on with the next line';
-  var MERGED = 'a quoted field here runs onto the following lines in a way that does not fit the columns, so the line could not be read; it was skipped and reading went on with the next line';
-  var NDC_ANY = /\d{4,5}-\d{3,4}-\d{1,2}|\d{11}/g;
 
   function key(h) { return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -88,55 +83,48 @@
     return best;
   }
 
-  /* Every non-blank row with the line it starts on and the line it ends on.
-     A row that may have swallowed other rows is returned with badQuote, and
-     reading restarts on the next physical line, so one stray quote cannot
-     take the rest of the file with it. That is: PapaParse reports a quote
-     error, or a field holds a line break followed by a line that has the
-     delimiter in it (a merged record, e.g. an unclosed quote that a later
-     inch mark happened to close). Legitimate multi-line fields without the
-     delimiter are kept and get a note. */
+  /* The whole file is read in one pass by PapaParse, which follows the CSV
+     standard (RFC 4180): a quoted field may hold commas, quotes and line
+     breaks, as Excel writes them (Alt+Enter). Damaged quoting is never
+     guessed around: when a quote problem is found, reading stops, `problem`
+     names the line, and the caller imports nothing from the file, because
+     after a broken quote it cannot be known where the following rows begin.
+     A quote problem is either one PapaParse reports, or a quoted field with
+     line breaks that does not fit: its record has a different number of
+     fields from the first row, or a later line inside it holds an NDC (so
+     other rows were swallowed), or the file has one column (robot lists).
+     Every record comes back with the line it starts on and ends on. */
+  var NDC_INSIDE = /\d{4,5}[- ]\d{3,4}[- ]\d{1,2}|\d{11}/;
+  var QUOTE_PROBLEM = 'a quote on this line is not closed or is out of place, so it cannot be known where this row ends and the next rows begin';
+  var SWALLOWED = 'a quoted field that starts on this line runs over several lines and takes in what look like other rows (a quote is probably missing or extra)';
   function lines(text) {
-    var t = String(text || '').replace(/^﻿/, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
-    var out = [], base = 0, line = 1, expected = null; // cells in the first row
-    while (base < t.length) {
-      var sub = t.slice(base), prev = 0, l = line, restartAt = -1;
-      Papa.parse(sub, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
-        var cur = r.meta.cursor, cells = r.data;
-        var lineEnd = sub.indexOf('\n', prev);
-        // Trailing blank cells beyond the first row's count do not change the count.
-        var count = cells.length;
-        while (expected != null && count > expected && !String(cells[count - 1]).trim()) count--;
-        // A field with a line break is a merged record when a later line in
-        // it has the delimiter or starts like an NDC, when the file has one
-        // column (robot lists), or when the row's field count differs from
-        // the first row's.
-        var multi = cells.some(function (c) { return String(c).indexOf('\n') >= 0; });
-        var merged = multi && (expected === 1 || (expected != null && count !== expected) || cells.some(function (c) {
-          var parts = String(c).split('\n');
-          return parts.length > 1 && parts.slice(1).some(function (s) { return s.indexOf(delim) >= 0 || NDC_START.test(s); });
-        }));
-        var quoteErr = (r.errors || []).some(function (e) { return e.type === 'Quotes'; });
-        if (merged || quoteErr) {
-          out.push({ cells: cells, line: l, endLine: l, badQuote: true, why: quoteErr ? BAD_QUOTE : MERGED });
-          restartAt = lineEnd < 0 ? sub.length : lineEnd + 1;
-          parser.abort();
-          return;
-        }
-        // Line breaks inside the row's fields give the line it ends on.
-        var inner = cells.join('').split('\n').length - 1;
-        if (cells.some(function (c) { return String(c).trim() !== ''; })) {
-          out.push({ cells: cells, line: l, endLine: l + inner });
-          if (expected == null) expected = cells.length;
-        }
-        l += countBreaks(sub, prev, cur);
-        prev = cur;
-      } });
-      if (restartAt < 0) break;
-      line = l + 1;
-      base += restartAt;
-    }
-    return { rows: out, empty: !t.trim() };
+    // Byte-order marks are dropped wherever they are (two exports pasted together).
+    var t = String(text || '').replace(/﻿/g, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
+    var out = [], prev = 0, l = 1, expected = null, problem = null;
+    var lastLine = t.split('\n').length - (/\n$/.test(t) ? 1 : 0);
+    Papa.parse(t, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
+      var cur = r.meta.cursor, cells = r.data;
+      var inner = cells.join('').split('\n').length - 1;
+      var quoteErr = (r.errors || []).some(function (e) { return e.type === 'Quotes'; });
+      // (Extra fields that are all blank are a trailing comma, not a swallowed row.)
+      var tooFew = expected != null && cells.length < expected;
+      var tooMany = expected != null && cells.length > expected && cells.slice(expected).some(function (c) { return String(c).trim() !== ''; });
+      var swallowed = inner > 0 && (expected === 1 || tooFew || tooMany || cells.some(function (c) {
+        return String(c).split('\n').slice(1).some(function (s) { return NDC_INSIDE.test(s); });
+      }));
+      if (quoteErr || swallowed) {
+        problem = { line: l, why: quoteErr ? QUOTE_PROBLEM : SWALLOWED };
+        parser.abort();
+        return;
+      }
+      if (cells.some(function (c) { return String(c).trim() !== ''; })) {
+        out.push({ cells: cells, line: l, endLine: l + inner });
+        if (expected == null) expected = cells.length;
+      }
+      l += countBreaks(t, prev, cur);
+      prev = cur;
+    } });
+    return { rows: out, empty: !t.trim(), problem: problem, lastLine: lastLine };
   }
 
   // The first non-blank row is the header.
@@ -145,10 +133,18 @@
     var fields = head ? head.cells.map(function (f) { return String(f).trim(); }) : [];
     var rows = l.rows.map(function (r) {
       var o = {};
-      fields.forEach(function (f, i) { if (!(f in o)) o[f] = r.cells[i]; });
-      return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, badQuote: r.badQuote, why: r.why, cells: r.cells };
+      fields.forEach(function (f, i) { if (f && !(f in o)) o[f] = r.cells[i]; });
+      return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, cells: r.cells };
     });
-    return { rows: rows, fields: fields, empty: l.empty, headBad: !!(head && (head.badQuote || head.endLine > head.line)), headLine: head ? head.line : 1 };
+    return { rows: rows, fields: fields, empty: l.empty, problem: l.problem, lastLine: l.lastLine,
+      headBad: !!(head && head.endLine > head.line), headLine: head ? head.line : 1 };
+  }
+
+  // A message for a file that was not read because of a quote problem.
+  function quoteProblem(pr, lastLine, what) {
+    return 'Nothing was ' + what + ' from this file. Line ' + pr.line + ': ' + pr.why + '. ' +
+      (lastLine > pr.line ? 'Lines ' + pr.line + '-' + lastLine + ' were not read. ' : '') +
+      'Fix that line (in the spreadsheet, or in a text editor) and import again; until then the data in use stays as it is.';
   }
 
   function mapColumns(fields) {
@@ -213,57 +209,74 @@
 
   /* Returns { products, lineOf, report }.
      report: { rows, imported, columns: {used, unused, missing}, skipped: [{row, ndc, reason}],
-               notes: [{row, ndc, note}], split, problem } where row is the line in the file.
-     Every data row is either imported (perhaps with notes) or skipped. */
+               notes: [{row, ndc, note}], fileNotes: [text], split, problem, fatal } where row
+     is the line in the file. Every data row is either imported (perhaps with
+     notes) or skipped; with fatal set, nothing is imported and problem says
+     which lines were not read. */
+  var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|tab|tabs|cap|caps|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
+  function blankCell(c) { return !String(c == null ? '' : c).trim(); }
   function importProducts(text, layout) {
     var p = parse(text), cols = mapColumns(p.fields), m = cols.map;
-    var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], problem: null,
+    var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], fileNotes: [], problem: null, fatal: false,
       columns: { used: m, unused: cols.unused, missing: [] } };
     var products = [], seen = {}, lineOf = {};
-    var inBad = {}; // NDCs seen inside unreadable records -> line of that record
-    if (p.empty) { report.problem = 'The file is empty.'; return { products: products, lineOf: lineOf, report: report }; }
-    if (p.headBad) {
-      report.problem = 'The header (line ' + p.headLine + ') has a quote problem or runs over several lines, so the columns cannot be known. Fix that line and import again.';
-      p.rows.forEach(function (r) { report.skipped.push({ row: r.line, ndc: '', reason: 'header could not be read' }); });
-      return { products: products, lineOf: lineOf, report: report };
-    }
-    if (!p.rows.length) { report.problem = 'The file has a header line but no rows.'; return { products: products, lineOf: lineOf, report: report }; }
+    var stop = function (msg) { report.problem = msg; report.fatal = true; return { products: [], lineOf: {}, report: report }; };
+    if (p.empty) return stop('The file is empty.');
+    if (p.problem) { report.rows = 0; return stop(quoteProblem(p.problem, p.lastLine, 'imported')); }
+    if (p.headBad) return stop('The header (line ' + p.headLine + ') runs over several lines, so the columns cannot be known. Nothing was imported. Fix that line and import again.');
+    if (!p.rows.length) return stop('The file has a header line but no rows.');
     ['ndc', 'drug', 'location', 'shelf'].forEach(function (c) { if (!m[c]) report.columns.missing.push(c); });
-    if (!m.ndc) {
-      report.problem = 'No NDC column found (expected a header such as "NDC"), so none of the ' + p.rows.length + ' rows were imported.';
-      p.rows.forEach(function (r) { report.skipped.push({ row: r.line, ndc: '', reason: 'no NDC column' }); });
-      return { products: products, lineOf: lineOf, report: report };
+    var none = p.rows.length === 1 ? 'the 1 row (line ' + p.rows[0].line + ') was not imported.'
+      : 'none of the ' + p.rows.length + ' rows (lines ' + p.rows[0].line + '-' + p.rows[p.rows.length - 1].line + ') were imported.';
+    if (!m.ndc) return stop('No NDC column found (expected a header such as "NDC"), so ' + none);
+    if (!m.drug) return stop('No drug name column found (expected a header such as "Drug", "Description" or "Item description"), so ' + none);
+
+    // A "Unit" column holding units of measure (EA, BX, ...) is not about shelving units.
+    if (m.unit) {
+      var vals = p.rows.map(function (r) { return String(r.data[m.unit] == null ? '' : r.data[m.unit]).trim(); }).filter(Boolean);
+      var uom = vals.filter(function (v) { return UOM.test(v); }).length;
+      if (vals.length && uom * 2 >= vals.length) {
+        var eg = vals.filter(function (v, i) { return UOM.test(v) && vals.indexOf(v) === i; }).slice(0, 3);
+        report.fileNotes.push('The "' + m.unit + '" column looks like a unit of measure (' + eg.join(', ') + '), not a shelving unit, so it was not used.');
+        cols.unused.push(m.unit); delete m.unit;
+      }
+    }
+
+    // Values are matched to columns by position, so a row with a different
+    // number of fields may be shifted (an unquoted comma inside a value, or a
+    // missing one): it is skipped, never guessed. Two exceptions that cannot
+    // shift anything: blank header names at the end (their cells may be left
+    // off), and a file where every row (5 or more) ends with the same number
+    // of extra empty fields (a trailing comma on every line).
+    var width = p.fields.length, named = width;
+    while (named > 0 && !p.fields[named - 1]) named--;
+    var pad = 0, k0 = p.rows[0].count - width;
+    if (p.rows.length >= 5 && k0 > 0 && p.rows.every(function (r) { return r.count === width + k0 && r.cells.slice(width).every(blankCell); })) {
+      pad = k0;
+      report.fileNotes.push('Every row ends with ' + pad + ' more empty field' + (pad > 1 ? 's' : '') + ' than the header (a trailing comma on each line); ' + (pad > 1 ? 'they were' : 'it was') + ' ignored.');
+    }
+    function fits(row) {
+      if (row.count === width + pad) return true;
+      return row.count >= named && row.count <= width && row.cells.slice(named).every(blankCell);
     }
 
     p.rows.forEach(function (row) {
       var r = row.data, line = row.line;
       var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
-      if (row.badQuote) {
-        var first = String(row.cells[p.fields.indexOf(m.ndc)] || '').split('\n')[0].trim().slice(0, 20);
-        report.skipped.push({ row: line, ndc: first, reason: row.why || BAD_QUOTE });
-        (row.cells.join(' ').match(NDC_ANY) || []).forEach(function (x) { var k = ndc.normalize(x); if (k && !inBad[k]) inBad[k] = line; });
-        return;
-      }
-      if (row.endLine > line) note('this row runs over lines ' + line + '-' + row.endLine + ' (a quoted field with line breaks); check nothing was merged');
       var rawNdc = get('ndc');
-      // Values are matched to columns by position, so a row with a different
-      // number of fields may be shifted: skip it rather than guess. Extra
-      // fields that are all blank (trailing commas) are fine.
-      var extraBlank = row.count > p.fields.length && row.cells.slice(p.fields.length).every(function (c) { return !String(c).trim(); });
-      if (row.count !== p.fields.length && !extraBlank) {
-        report.skipped.push({ row: line, ndc: rawNdc, reason: 'has ' + row.count + ' fields but the header has ' + p.fields.length + ', so its columns cannot be matched safely' });
+      if (!fits(row)) {
+        report.skipped.push({ row: line, ndc: rawNdc, reason: 'has ' + row.count + ' fields but the header has ' + width +
+          ' (an unquoted comma inside a value, or a missing one), so its values cannot be matched to columns safely' });
         return;
       }
+      if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       seen[n] = line; lineOf[n] = line;
-      // It cannot be told whether this is a real row or the rest of an
-      // unreadable record above it, so it is imported with a warning.
-      if (inBad[n] && inBad[n] < line) note('this NDC also appears inside line ' + inBad[n] + ', which could not be read; check this line is a complete record and not the end of that one');
 
       var prod = { ndc: n, drug: drug };
       var strength = get('strength'), form = get('form');
@@ -276,6 +289,12 @@
         if (sm) {
           prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
           var rest = sm[3].trim(), restUsed = !form && !!rest;
+          // "TAB 1000 CT": the pack count is not part of the form.
+          var ct = /^(.*?)\s*\b(\d+)\s*(ct|cnt|count|ea)\.?$/i.exec(rest);
+          if (restUsed && ct) {
+            rest = ct[1].trim(); restUsed = !!rest;
+            if (!get('countPerBottle')) { prod.countPerBottle = Number(ct[2]); note('"' + ct[2] + ' ' + ct[3] + '" in the description read as a count of ' + ct[2]); }
+          }
           if (restUsed) form = rest;
           report.split++;
           note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed ? ', form "' + form + '"' : '') +
@@ -287,16 +306,23 @@
       if (get('manufacturer')) prod.manufacturer = get('manufacturer');
       if (get('notes')) prod.notes = get('notes');
 
-      var loc = null, rawLoc = get('location');
+      var loc = null, rawLoc = get('location'), unitInLoc = null;
       if (rawLoc) {
         loc = findLocation(rawLoc, layout);
-        if (loc) {
+        // A unit code in the Location column ("FM-N"): its location and unit.
+        if (!loc) {
+          layout.locations.forEach(function (lc) { lc.units.forEach(function (u) { if (!unitInLoc && key(u.id) === key(rawLoc)) { unitInLoc = u; loc = lc; } }); });
+          if (unitInLoc) { prod.location = loc.code; note('location "' + rawLoc + '" read as ' + loc.code + ', unit ' + unitInLoc.id); }
+        }
+        if (unitInLoc) { /* done above */ } else if (loc) {
           prod.location = loc.code;
           if (loc.code.toUpperCase() !== rawLoc.toUpperCase()) note('location "' + rawLoc + '" read as ' + loc.code);
         } else { prod.location = rawLoc.toUpperCase(); note('location "' + rawLoc + '" is not on the layout yet; the map will say so'); }
       }
       var unit = null, rawUnit = get('unit'), unitWhy = '';
-      if (rawUnit) {
+      if (unitInLoc && (!rawUnit || key(rawUnit) === key(unitInLoc.id) || key(rawUnit) === key(unitInLoc.label))) { unit = unitInLoc; prod.unit = unit.id; }
+      else if (unitInLoc) { note('unit "' + rawUnit + '" does not match the unit ' + unitInLoc.id + ' given as the location; unit left unknown'); unitWhy = 'the unit columns disagree'; }
+      else if (rawUnit) {
         if (!loc) { note('unit "' + rawUnit + '" ignored: no known location'); unitWhy = 'no known location'; }
         else {
           unit = loc.units.filter(function (u) { return key(u.id) === key(rawUnit) || key(u.label) === key(rawUnit); })[0] || null;
@@ -352,22 +378,26 @@
   /* Marks NDCs from a robot list as robot (and preferred, if opts.preferred).
      One column of NDCs, with or without a header. NDCs not in the products
      are reported, not invented. opts.lineOf maps NDC -> products file line,
-     for notes about products the list does not mention. Returns a report. */
+     for notes about products the list does not mention. Returns a report;
+     report.prior holds each changed product's earlier robot, preferred and
+     location values (null = not set), so restoreRobot() can undo the list
+     before a newer list is applied. Nothing is changed when report.fatal. */
   function applyRobotList(text, products, layout, opts) {
     opts = opts || {};
     var l = lines(text), rows = l.rows, col = 0, start = 0;
-    var report = { rows: 0, matched: 0, notFound: [], skipped: [], notes: [], movedToRobot: 0, problem: null };
-    if (l.empty || !rows.length) { report.problem = 'The robot list is empty.'; return report; }
+    var report = { rows: 0, matched: 0, notFound: [], skipped: [], notes: [], movedToRobot: 0, problem: null, fatal: false, prior: {} };
+    if (l.problem) { report.problem = quoteProblem(l.problem, l.lastLine, 'used'); report.fatal = true; return report; }
+    if (l.empty || !rows.length) { report.problem = 'The robot list is empty.'; report.fatal = true; return report; }
     var first = rows[0].cells, at = -1;
     first.map(key).forEach(function (h, i) { if (at < 0 && COLUMNS.ndc.indexOf(h) >= 0) at = i; });
     var looksLikeData = first.some(function (c) { c = String(c).trim(); return SCI.test(c) || /\d{5}/.test(c) || ndc.digits(c).length >= 10; });
     if (at >= 0) { col = at; start = 1; }
-    else if (!looksLikeData && !rows[0].badQuote) {
+    else if (!looksLikeData) {
       start = 1;
       report.notes.push({ row: rows[0].line, ndc: '', note: 'read as a header line: "' + first.join(',') + '"' });
     }
     report.rows = rows.length - start;
-    if (!report.rows) { report.problem = 'The robot list has a header line but no NDCs.'; return report; }
+    if (!report.rows) { report.problem = 'The robot list has a header line but no NDCs.'; report.fatal = true; return report; }
 
     var byNdc = {};
     products.forEach(function (p) { byNdc[p.ndc] = p; });
@@ -375,13 +405,13 @@
     var seen = {};
     for (var i = start; i < rows.length; i++) {
       var line = rows[i].line;
-      if (rows[i].badQuote) { report.skipped.push({ row: line, ndc: String(rows[i].cells[col] || '').split('\n')[0].trim().slice(0, 20), reason: rows[i].why || BAD_QUOTE }); continue; }
       var raw = String(rows[i].cells[col] || '').trim(), n = ndc.normalize(raw);
       if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
       seen[n] = line;
       var p = byNdc[n];
       if (!p) { report.notFound.push({ row: line, ndc: raw }); continue; }
+      report.prior[n] = { robot: 'robot' in p ? p.robot : null, preferred: 'preferred' in p ? p.preferred : null, location: p.location == null ? null : p.location };
       if (p.robot === false) report.notes.push({ row: line, ndc: raw, note: 'the products file said not in the robot; the robot list wins' });
       p.robot = true;
       if (opts.preferred) {
@@ -400,12 +430,22 @@
     // Products marked robot in their own file but missing from the robot list.
     products.forEach(function (p) {
       if (p.robot === true && !seen[p.ndc]) {
-        report.notes.push({ row: '-', ndc: ndc.format(p.ndc), note: 'marked in the robot' + (opts.lineOf && opts.lineOf[p.ndc] ? ' on products line ' + opts.lineOf[p.ndc] : '') + ' but not in the robot list; left as given' });
+        report.notes.push({ row: '-', ndc: ndc.format(p.ndc), note: 'marked in the robot by the products file' + (opts.lineOf && opts.lineOf[p.ndc] ? ' (line ' + opts.lineOf[p.ndc] + ')' : '') + ' but not in this robot list; left as given' });
       }
     });
     var byLine = function (a, b) { return (a.row === '-' ? 1e9 : a.row) - (b.row === '-' ? 1e9 : b.row); };
     report.skipped.sort(byLine); report.notes.sort(byLine);
     return report;
+  }
+
+  // Undoes an earlier robot list (its report.prior) on these products.
+  function restoreRobot(products, prior) {
+    if (!prior) return;
+    products.forEach(function (p) {
+      var was = prior[p.ndc];
+      if (!was) return;
+      ['robot', 'preferred', 'location'].forEach(function (f) { if (was[f] === null) delete p[f]; else p[f] = was[f]; });
+    });
   }
 
   // A dataset built from imported products on top of a base dataset's
@@ -422,6 +462,6 @@
     };
   }
 
-  return { decode: decode, parse: parse, lines: lines, mapColumns: mapColumns, importProducts: importProducts, applyRobotList: applyRobotList,
+  return { decode: decode, parse: parse, lines: lines, mapColumns: mapColumns, importProducts: importProducts, applyRobotList: applyRobotList, restoreRobot: restoreRobot,
     buildDataset: buildDataset, COLUMNS: COLUMNS };
 });

@@ -34,26 +34,35 @@
     if (memoryOnly) return; // storage is blocked: keep what is in memory
     migrateOldList();
     store.keys(KEY).forEach(function (k) {
-      var id = k.slice(KEY.length), raw = store.raw(k), p = null;
+      var id = k.slice(KEY.length), raw = store.raw(k), p = null, why = null;
       try { p = JSON.parse(raw); } catch (e) { p = null; }
-      var valid = p && typeof p === 'object' && p.id === id && ID_RE.test(id) && !builtins[id] &&
-        !P.check(p).length && !names[P.clean(p.name).toLowerCase()];
-      if (valid) { names[P.clean(p.name).toLowerCase()] = 1; ok.push(p); } else bad.push(k);
+      if (!p || typeof p !== 'object' || Array.isArray(p)) why = 'it is not readable preset data';
+      else if (!ID_RE.test(id) || p.id !== id) why = 'its id does not match its storage key';
+      else if (builtins[id]) why = 'it has the id of a built-in preset';
+      else if (P.check(p).length) why = P.check(p)[0];
+      else if (names[P.clean(p.name).toLowerCase()]) why = 'another preset (built in or yours) already has the name "' + P.clean(p.name) + '"';
+      if (!why) { names[P.clean(p.name).toLowerCase()] = 1; ok.push(p); } else bad.push({ key: k, why: why });
     });
     mine = ok; broken = bad;
   }
+  function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
   // Version-14 to 16 kept all presets in one list under "alpha.presets".
-  // Copy readable ones to their own entries once; the old list is left as is.
+  // Copy readable ones to their own entries; the old list is left as is.
+  // It is marked done only when every one was copied, so a copy that did not
+  // fit (full storage) is tried again on every load, and the page says so.
+  var notMigrated = 0;
   function migrateOldList() {
+    notMigrated = 0;
     if (store.raw('presets-migrated') != null) return;
     var raw = store.raw('presets'), v = null;
     if (raw == null) return;
     try { v = JSON.parse(raw); } catch (e) { v = null; }
     (Array.isArray(v) ? v : []).forEach(function (p) {
-      if (p && typeof p.id === 'string' && ID_RE.test(p.id) && store.raw(KEY + p.id) == null) store.set(KEY + p.id, p);
+      if (!p || typeof p.id !== 'string' || !ID_RE.test(p.id) || store.raw(KEY + p.id) != null) return;
+      if (!store.set(KEY + p.id, p)) notMigrated++;
     });
-    store.setRaw('presets-migrated', '1');
+    if (!notMigrated && !store.setRaw('presets-migrated', '1')) { /* tried again next load; harmless */ }
   }
 
   // Returns false when the browser would not store it (for example, full).
@@ -72,7 +81,9 @@
   }
 
   // Storage blocked altogether? Then presets live in memory for this page.
-  (function () { if (!store.set('probe', 1)) memoryOnly = true; })();
+  // (Full storage is not blocked: saved presets are still read, and a save
+  // that does not fit says "Not saved".)
+  memoryOnly = !store.usable();
 
   // Unsaved changes in the editor?
   function dirty() { return !!editing && JSON.stringify(strip(editing.draft)) !== editing.start; }
@@ -103,7 +114,7 @@
 
   function uniqueId(name) {
     var base = 'user-' + P.slug(name), id = base, n = 2;
-    while (find(Alpha.state.ds, id) || broken.indexOf(KEY + id) >= 0) id = base + '-' + n++;
+    while (find(Alpha.state.ds, id) || isBroken(KEY + id)) id = base + '-' + n++;
     return id;
   }
   // A free name that still fits the length limit.
@@ -191,10 +202,12 @@
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
       (broken.length ? '<div class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage:<ul class="broken-list">' +
-        broken.map(function (k) {
-          return '<li>' + esc('alpha.' + k) + ' <button type="button" class="btn small" data-act="broken-dl" data-key="' + esc(k) + '">Download as is</button> ' +
-            '<button type="button" class="btn small" data-act="broken-rm" data-key="' + esc(k) + '">Remove</button></li>';
+        broken.map(function (b) {
+          return '<li>' + esc('alpha.' + b.key) + ': ' + esc(b.why) + '. <button type="button" class="btn small" data-act="broken-dl" data-key="' + esc(b.key) + '">Download as is</button> ' +
+            '<button type="button" class="btn small" data-act="broken-rm" data-key="' + esc(b.key) + '">Remove</button></li>';
         }).join('') + '</ul></div>' : '') +
+      (notMigrated ? '<p class="note-bad small">' + notMigrated + ' preset(s) saved by an older version of Alpha could not be copied to the new storage because this browser\'s storage is full. ' +
+        'They are kept as they were and will be copied once space is freed.</p>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
@@ -204,6 +217,32 @@
     if (editing) showErrors();
     var f = focusSel && dlg.querySelector(focusSel);
     if (f) f.focus();
+  }
+
+  // A selector for the focused control, so a redraw can put focus back.
+  function focusKey(el) {
+    if (!el || !dlg.contains(el) || el === dlg) return null;
+    var a = function (n) { return el.getAttribute(n); }, q = function (v) { return '"' + String(v).replace(/["\\]/g, '\\$&') + '"'; };
+    if (el.id) return '#' + el.id;
+    var row = el.closest('.preset-row');
+    if (row && a('data-act')) return '.preset-row[data-id=' + q(row.getAttribute('data-id')) + '] [data-act=' + q(a('data-act')) + ']';
+    if (a('data-act') && a('data-key')) return '[data-act=' + q(a('data-act')) + '][data-key=' + q(a('data-key')) + ']';
+    if (a('data-act') && a('data-i')) return '[data-act=' + q(a('data-act')) + '][data-i=' + q(a('data-i')) + ']';
+    if (a('data-i') && a('data-f')) return '[data-i=' + q(a('data-i')) + '][data-f=' + q(a('data-f')) + ']';
+    if (a('data-act')) return '[data-act=' + q(a('data-act')) + ']';
+    return null;
+  }
+  // Redraw (after a change in another window) keeping focus and the caret.
+  function redrawKeepingFocus() {
+    var el = document.activeElement, sel = focusKey(el), caret = null;
+    try { if (el && typeof el.selectionStart === 'number') caret = [el.selectionStart, el.selectionEnd]; } catch (e) { caret = null; }
+    render();
+    var back = sel && dlg.querySelector(sel);
+    if (!back) back = dlg.querySelector('#pe-status');
+    if (back) {
+      back.focus();
+      if (caret) try { back.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text field */ }
+    }
   }
 
   // Names are compared as they will be stored (spacing tidied, any case).
@@ -228,7 +267,8 @@
   function startEdit(p, origId) {
     var d = JSON.parse(JSON.stringify(p));
     d.groups.forEach(function (g) { g.own = false; });
-    editing = { origId: origId, draft: d, start: JSON.stringify(strip(d)) };
+    // base: the stored text when editing began, to notice a save from another window.
+    editing = { origId: origId, draft: d, start: JSON.stringify(strip(d)), base: origId ? store.raw(KEY + origId) : null };
     status = '';
     render('#pe-name');
   }
@@ -251,8 +291,17 @@
     var t = P.tidy(editing.draft);
     if (editing.origId) {
       // Deleted in another window while being edited? Ask before bringing it back.
-      if (!memoryOnly && store.raw(KEY + editing.origId) == null &&
-          !window.confirm('This preset was deleted in another window. Save it again?')) return;
+      var now = memoryOnly ? editing.base : store.raw(KEY + editing.origId);
+      if (now == null && !memoryOnly) {
+        if (!window.confirm('This preset was deleted in another window. Save it again?')) return;
+      } else if (now !== editing.base) {
+        // Saved in another window since editing began: never overwrite it unasked.
+        if (!window.confirm('This preset was changed in another window after you started editing. Save your version over those changes?')) {
+          status = 'Not saved. Your changes are still in the editor; the other window\'s version is in the list above.';
+          var st0 = dlg.querySelector('#pe-status'); st0.textContent = status; st0.focus();
+          return;
+        }
+      }
       t.id = editing.origId;
     } else t.id = uniqueId(t.name);
     if (!saveOne(t)) {
@@ -300,6 +349,12 @@
     if (!b) return;
     var act = b.getAttribute('data-act'), row = b.closest('.preset-row'), ds = Alpha.state.ds;
     var p = row ? find(ds, row.getAttribute('data-id')) : null;
+    if (row && !p) {
+      // The row was drawn before another window deleted the preset.
+      status = 'That preset is no longer saved in this browser (it was deleted in another window).';
+      render('#pe-status');
+      return;
+    }
     if (act === 'use') { Alpha.settings.useScheme(p.id); status = 'Now using "' + p.name + '".'; render('#pe-status'); }
     else if (act === 'edit') { if (okToDiscard()) startEdit(p, p.id); }
     else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = uniqueName('Copy of ' + p.name).slice(0, P.MAX_NAME); startEdit(c, null); }
@@ -400,13 +455,20 @@
       editing = null;
     });
     dlg.addEventListener('close', function () { editing = null; Alpha.settings.open(); });
+    // Closing or reloading the tab with an unsaved draft asks first.
+    window.addEventListener('beforeunload', function (e) { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
     // Another window saved or deleted a preset: reload the list.
     window.addEventListener('storage', function (e) {
       if (e.key != null && e.key.indexOf('alpha.' + KEY) !== 0) return;
       loadMine();
       Alpha.settings.notify();
-      if (dlg.open && !editing) render();
-      else if (dlg.open) { status = 'Presets were changed in another window.'; var st = dlg.querySelector('#pe-status'); if (st) st.textContent = status; }
+      if (!dlg.open) return;
+      // The list is redrawn; an open draft is kept as it is (it lives in memory).
+      if (editing && editing.origId && e.key === 'alpha.' + KEY + editing.origId) {
+        status = e.newValue == null ? 'The preset you are editing was deleted in another window. Saving will ask before bringing it back.'
+          : 'The preset you are editing was changed in another window. Saving will ask before replacing that version.';
+      } else status = 'Presets were changed in another window; the list is up to date.';
+      redrawKeepingFocus();
     });
   }
 

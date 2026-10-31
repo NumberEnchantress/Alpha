@@ -59,7 +59,7 @@
     // Where to stand: a disc with a pointer, placed by show().
     // Drawn last, so nothing covers it. Its contents are in standard units and
     // the group is scaled by k.
-    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="3"/><text class="marker-text" y="0.1" font-size="1.75">YOU</text>' +
+    parts.push('<g id="map-marker" class="marker" visibility="hidden"><circle r="3"/><text class="marker-text" y="0.1" font-size="2.3">YOU</text>' +
       '<g class="marker-est" visibility="hidden"><rect x="-3.6" y="-1.45" width="7.2" height="2.9" rx="0.5"/><text y="0" font-size="2">EST.</text></g></g>');
     parts.push('</svg>');
     el.innerHTML = parts.join('');
@@ -128,8 +128,18 @@
           markerEst.setAttribute('transform', 'translate(' + off[0] + ' ' + off[1] + ')');
           markerEst.setAttribute('visibility', 'visible');
         }
+        if (narrow.matches) scrollToX(p[0]);
       }
     }
+  }
+
+  // At phone width the map scrolls sideways (see app.css); bring the marker
+  // into view. Only then, so wide screens never pay for a layout read.
+  var narrow = window.matchMedia ? window.matchMedia('(max-width: 760px)') : { matches: false };
+  function scrollToX(x) {
+    var w = el.scrollWidth, v = el.clientWidth;
+    if (w <= v) return;
+    el.scrollLeft = Math.max(0, Math.min(w - v, (x + k) / (layout.width + 2 * k) * w - v / 2));
   }
 
   // Where the EST. tag goes, relative to the marker (standard units): the
@@ -144,6 +154,9 @@
     (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
     for (var i = 0; i < TAG_SPOTS.length; i++) {
       var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k, hw = 4.3 * k, hh = 2.1 * k, area = 0;
+      // Any part outside the floor counts as covered: the tag must stay on the map.
+      var inW = Math.max(0, Math.min(cx + hw, layout.width) - Math.max(cx - hw, 0)), inH = Math.max(0, Math.min(cy + hh, layout.depth) - Math.max(cy - hh, 0));
+      area += 4 * hw * hh - inW * inH;
       boxes.forEach(function (r) {
         var w = Math.min(cx + hw, r.x + r.w) - Math.max(cx - hw, r.x), h = Math.min(cy + hh, r.y + r.h) - Math.max(cy - hh, r.y);
         if (w > 0 && h > 0) area += w * h;

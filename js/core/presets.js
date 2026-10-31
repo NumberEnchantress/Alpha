@@ -31,12 +31,16 @@
   ];
 
   function isStr(s) { return typeof s === 'string'; }
-  // Runs of spaces, tabs and zero-width characters look like one space on screen.
-  function clean(s) { return isStr(s) ? s.replace(/[\s\u200B-\u200D\uFEFF]+/g, ' ').trim() : ''; }
+  // Runs of spaces, tabs and zero-width characters look like one space on
+  // screen, and "\u00E9" can be one character or "e" plus an accent: both are
+  // stored the same way (NFC), so look-alike text compares as equal.
+  function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B-\u200D\uFEFF]+/g, ' ').trim() : ''; }
+  // Text with nothing but accent marks shows as nothing.
+  function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
-  // Invisible format characters (zero-width, soft hyphen, direction marks
-  // and overrides) can make different text look the same, so they are refused.
-  var INVISIBLE = /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿ﾠ]/;
+  // Invisible characters (control codes, zero-width, soft hyphen, direction
+  // marks, variation selectors, tag characters, blank braille) are refused.
+  var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
   function invisible(s) { return isStr(s) && INVISIBLE.test(s); }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
   function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
@@ -46,19 +50,41 @@
     var n = name.toLowerCase();
     return COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0] || null;
   }
+  // A name that contains one standard colour word ("Navy blue", "Light
+  // grey") must be that kind of colour: the same hue family for colours,
+  // dark for black, light for white, unsaturated for grey.
+  var FAMILY = { red: [345, 20], orange: [15, 45], yellow: [40, 70], green: [70, 170], blue: [170, 255], purple: [255, 300], pink: [300, 350] };
+  function hsl(hex) {
+    var c = rgb(hex).map(function (v) { return v / 255; }), max = Math.max.apply(null, c), min = Math.min.apply(null, c), l = (max + min) / 2, d = max - min, h = 0;
+    var s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (d) h = max === c[0] ? 60 * (((c[1] - c[2]) / d) % 6) : max === c[1] ? 60 * ((c[2] - c[0]) / d + 2) : 60 * ((c[0] - c[1]) / d + 4);
+    return [(h + 360) % 360, s, l];
+  }
+  function wordMismatch(name, hex) {
+    var words = name.toLowerCase().split(/[^a-z]+/).map(function (w) { return w === 'gray' ? 'grey' : w; });
+    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) { return words.indexOf(id) >= 0; });
+    if (found.length !== 1) return false; // none, or a mix such as "blue-green"
+    var w = found[0], v = hsl(hex), h = v[0], s = v[1], l = v[2];
+    if (w === 'black') return l > 0.3;
+    if (w === 'white') return l < 0.8;
+    if (w === 'grey') return s > 0.25 && l > 0.1 && l < 0.9;
+    var f = FAMILY[w];
+    if (s < 0.2 || l < 0.08 || l > 0.95) return true; // too grey, dark or light to be a colour
+    return f[0] < f[1] ? !(h >= f[0] && h < f[1]) : !(h >= f[0] || h < f[1]);
+  }
 
   // Problems with a preset, as plain sentences. Empty list = valid.
   function check(p) {
     var errors = [];
     if (!p || typeof p !== 'object' || Array.isArray(p)) return ['Not a preset.'];
     if (invisible(p.name)) errors.push('The name contains invisible characters; type it again.');
-    else if (!isStr(p.name) || !clean(p.name)) errors.push('Give the preset a name.');
+    else if (!isStr(p.name) || blank(p.name)) errors.push('Give the preset a name.');
     else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
 
     var colours = map(), names = map(), seenHex = [];
     if (!Array.isArray(p.colours)) errors.push('The preset has no colour list.');
     (Array.isArray(p.colours) ? p.colours : []).forEach(function (c) {
-      if (!c || !isStr(c.id) || !/^[A-Za-z0-9_-]{1,24}$/.test(c.id) || !isStr(c.name) || !clean(c.name) ||
+      if (!c || !isStr(c.id) || !/^[A-Za-z0-9_-]{1,24}$/.test(c.id) || !isStr(c.name) || blank(c.name) ||
           !isStr(c.hex) || !/^#[0-9a-f]{6}$/i.test(c.hex)) {
         errors.push('A colour needs an id (letters, digits, - or _, up to 24), a name and a hex code like #1a1a1a.');
         return;
@@ -69,6 +95,7 @@
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       var std = standard(name);
       if (std && distance(std.hex, c.hex) >= 80) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + name.toLowerCase() + '.');
+      else if (!std && wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like its name.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
       if (names[name.toLowerCase()]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];
@@ -86,7 +113,7 @@
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
       var label = clean(g.label);
       if (invisible(g.label)) errors.push(n + ': the label contains invisible characters; type it again.');
-      else if (!isStr(g.label) || !label) errors.push(n + ' needs a label.');
+      else if (!isStr(g.label) || blank(g.label)) errors.push(n + ' needs a label.');
       else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
       else if (labels[label.toLowerCase()]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[label.toLowerCase()] + '.');
       else labels[label.toLowerCase()] = i + 1;

@@ -132,10 +132,16 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 
 /* Narrower windows (a half-screen window, a small laptop): the shelf view
    goes under the map instead of beside it, with its text beside the drawing. */
+/* The rows have minimum heights that keep map and shelf text at 11 px or
+   more; a window too short for both scrolls the page, and the search pane
+   stays in view. */
 @media (max-width: 1100px) {
-  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) 24rem; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "map side" "elev side"; }
+  body { overflow-y: auto; }
+  .grid { flex: 1 0 auto; }
+  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) clamp(18rem, 40vw, 24rem); grid-template-rows: minmax(330px, 33fr) minmax(350px, 35fr); grid-template-areas: "map side" "elev side"; }
+  .grid:not(.has-elev) { grid-template-rows: minmax(330px, 1fr) 0; }
   .grid .pane-map { grid-area: map; }
-  .grid .pane-side { grid-area: side; }
+  .grid .pane-side { grid-area: side; position: sticky; top: .5rem; align-self: start; height: calc(100vh - 4.2rem); max-height: 100%; }
   .grid.has-elev .pane-elev { grid-area: elev; }
   /* The unit name heads the shelf view here; the pane title stays for screen readers. */
   .pane-elev > .pane-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -145,14 +151,21 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .elev > .elev-draw { grid-column: 2; grid-row: 1 / 5; min-height: 0; }
   .elev > .elev-caption { grid-row: 4; border-top: 0; }
 }
+/* Phone width: one column (search, map, shelf). Panes size to their content
+   here (size containment would collapse them), the top bar wraps, and the
+   map scrolls sideways rather than shrink below readable text. */
 @media (max-width: 760px) {
   body { overflow: auto; }
+  .top { flex-wrap: wrap; }
   .grid, .grid.has-elev { display: flex; flex-direction: column; }
-  .pane-side { order: -1; }
-  .pane-map { min-height: 50vh; }
-  .grid.has-elev .pane-elev { display: flex; min-height: 50vh; }
+  .grid .pane { contain: layout paint; flex: none; }
+  .grid .pane-side { order: -1; position: static; height: auto; min-height: 60vh; }
+  .pane-map { height: 340px; }
+  .pane-map .map { overflow-x: auto; }
+  .pane-map .map svg { min-width: 430px; }
+  .grid.has-elev .pane-elev { display: flex; }
   .elev { display: flex; }
-  .elev > .elev-draw { min-height: 12rem; }
+  .elev > .elev-draw { min-height: 20rem; }
 }
 
 /* Map drawing. Strokes are screen pixels (non-scaling), so they look the same on any floor size. */
@@ -231,7 +244,14 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .pe-table { border-collapse: collapse; margin: .5rem 0; width: 100%; }
 .pe-table th, .pe-table td { text-align: left; padding: .2rem .35rem; border-bottom: 1px solid #ddd; vertical-align: middle; }
 .pe-table select, .pe-table input { font: inherit; padding: .15rem .25rem; }
-.pe-table .own-label { margin-left: .35rem; width: 11rem; }
+/* Fixed columns, so long labels (up to 40 characters) never widen the table past the dialog. */
+.pe-table { table-layout: fixed; }
+.pe-table th:nth-child(1) { width: 2rem; }
+.pe-table th:nth-child(3), .pe-table th:nth-child(4) { width: 9.5rem; }
+.pe-table th:nth-child(5) { width: 5.5rem; }
+.pe-table td:nth-child(2) select { width: 100%; max-width: 16rem; }
+.pe-table td:nth-child(3) select, .pe-table td:nth-child(4) select { max-width: calc(100% - 1.7rem); }
+.pe-table .own-label { display: block; margin: .25rem 0 0; width: 100%; max-width: 16rem; }
 .pe-errors { color: var(--danger-line); font-weight: 600; margin: .4rem 0; padding-left: 1.2rem; }
 .pe-errors:empty { display: none; }
 .pe-buttons { margin-top: .4rem; }
