@@ -67,29 +67,41 @@
   }
   function migrateOldList() {
     notMigrated = 0; oldLeft = null;
-    var raw = store.raw('presets'), backup = store.raw('presets-unreadable'), v = null, notPresets = 0;
+    var raw = store.raw('presets'), backup = store.raw('presets-unreadable'), v = null, notPresets = 0, shared = 0;
     if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
     var list = Array.isArray(v) ? v : [];
     list.forEach(function (p) { if (!p || typeof p !== 'object' || Array.isArray(p)) notPresets++; });
-    if ((raw != null && !Array.isArray(v)) || notPresets || backup != null) {
-      oldLeft = { unreadableList: raw != null && !Array.isArray(v), notPresets: notPresets, backup: backup != null };
-    }
-    if (store.raw('presets-migrated-2') != null || !list.length) return;
-    var used = builtInIds();
-    list.forEach(function (p) {
-      if (!p || typeof p !== 'object' || Array.isArray(p)) return;
-      var okId = typeof p.id === 'string' && ID_RE.test(p.id) && !used[p.id];
-      if (okId) {
-        var there = store.raw(KEY + p.id), q = null;
+    var done = store.raw('presets-migrated-2');
+    if (done == null && list.length) {
+      // Versions 17-21 already copied entries with a good, unused id; those
+      // that are gone now were deleted since, and are not brought back. An
+      // entry whose id now holds a preset with another name was renamed since,
+      // or was a different preset that those versions skipped: it is not
+      // copied, but the page says so (it stays in the old data). Only what
+      // those versions skipped for a bad or repeated id is copied.
+      var ranBefore = store.raw('presets-migrated') != null, firstSeen = Object.create(null);
+      var used = builtInIds();
+      list.forEach(function (p) {
+        if (!p || typeof p !== 'object' || Array.isArray(p)) return;
+        var goodId = typeof p.id === 'string' && ID_RE.test(p.id) && !used[p.id];
+        var repeat = typeof p.id === 'string' && !!firstSeen[p.id];
+        if (typeof p.id === 'string') firstSeen[p.id] = 1;
+        var there = goodId ? store.raw(KEY + p.id) : null, q = null;
         if (there != null) { try { q = JSON.parse(there); } catch (e) { q = null; } }
-        if (q && q.name === p.name) { used[p.id] = 1; return; } // copied before
-        if (there != null) okId = false;
-      }
-      var id = okId ? p.id : freeId(p.name, used);
-      used[id] = 1;
-      if (!store.set(KEY + id, Object.assign({}, p, { id: id }))) notMigrated++;
-    });
-    if (!notMigrated) store.setRaw('presets-migrated-2', '1');
+        if (goodId && !repeat && q && q.name === p.name) { used[p.id] = 1; return; } // copied before
+        if (ranBefore && goodId && !repeat) { used[p.id] = 1; if (there != null) shared++; return; }
+        var id = goodId && there == null ? p.id : freeId(p.name, used);
+        used[id] = 1;
+        if (!store.set(KEY + id, Object.assign({}, p, { id: id }))) notMigrated++;
+      });
+      if (!notMigrated) store.setRaw('presets-migrated-2', JSON.stringify({ shared: shared }));
+    } else if (done != null) {
+      try { shared = Number(JSON.parse(done).shared) || 0; } catch (e) { shared = 0; }
+    }
+    if (raw == null) shared = 0; // the old data was removed
+    if ((raw != null && !Array.isArray(v)) || notPresets || backup != null || shared) {
+      oldLeft = { unreadableList: raw != null && !Array.isArray(v), notPresets: notPresets, backup: backup != null, shared: shared };
+    }
   }
   function downloadOld() {
     var a = document.createElement('a'), out = { 'alpha.presets': store.raw('presets'), 'alpha.presets-unreadable': store.raw('presets-unreadable') };
@@ -145,8 +157,10 @@
     return out;
   }
 
+  // Ids carry a time and random part, so an id is never used again after a
+  // delete (a save from another window can then never land on a different preset).
   function uniqueId(name) {
-    var base = 'user-' + P.slug(name), id = base, n = 2;
+    var base = 'user-' + P.slug(name) + '-' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36), id = base, n = 2;
     while (find(Alpha.state.ds, id) || isBroken(KEY + id)) id = base + '-' + n++;
     return id;
   }
@@ -197,7 +211,7 @@
     var opts = '<option value="">Choose a label…</option>' + choices.map(function (c) {
       return '<option value="' + esc(c) + '"' + (!own && c === g.label ? ' selected' : '') + '>' + esc(c) + '</option>';
     }).join('') + '<option value="' + OWN + '"' + (own ? ' selected' : '') + '>Type your own…</option>';
-    return '<select id="pl-' + i + '" data-i="' + i + '" data-f="label" aria-label="Group ' + (i + 1) + ' label">' + opts + '</select>' +
+    return '<select id="pl-' + i + '" data-i="' + i + '" data-f="label" aria-label="Group ' + (i + 1) + ' label" title="' + esc(g.label) + '">' + opts + '</select>' +
       '<input type="text" id="po-' + i + '" data-i="' + i + '" data-f="own" class="own-label" aria-label="Group ' + (i + 1) + ' label, typed"' +
       ' maxlength="' + P.MAX_LABEL + '" value="' + esc(own ? g.label : '') + '"' + (own ? '' : ' hidden') + ' placeholder="Label">';
   }
@@ -231,9 +245,16 @@
       '<button type="button" class="btn" data-act="cancel">Cancel</button></div></fieldset>';
   }
 
+  // The page is drawn into #pe-body; #pe-live stays, so screen readers hear status changes.
+  function body() {
+    var b = dlg.querySelector('#pe-body');
+    if (!b) { dlg.innerHTML = '<div id="pe-body"></div><p id="pe-live" class="sr" role="status" aria-live="polite"></p>'; b = dlg.querySelector('#pe-body'); }
+    return b;
+  }
+  function announce(text) { var l = dlg.querySelector('#pe-live'); if (l && l.textContent !== text) l.textContent = text; }
   function render(focusSel) {
     var ds = Alpha.state.ds;
-    dlg.innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
+    body().innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
       (broken.length ? '<div class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage:<ul class="broken-list">' +
@@ -245,18 +266,21 @@
         'They are kept as they were and will be copied once space is freed.</p>' : '') +
       (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha could not all be read: ' +
         [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + ' entr' + (oldLeft.notPresets === 1 ? 'y is' : 'ies are') + ' not presets' : '',
-          oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : ''].filter(Boolean).join('; ') +
-        '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button> ' +
-        '<button type="button" class="btn small" data-act="old-rm">Remove old data</button></div>' : '') +
+          oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : '',
+          oldLeft.shared ? oldLeft.shared + ' old preset' + (oldLeft.shared === 1 ? ' has' : 's have') + ' the id of a preset you have now under another name (renamed since, or a different preset) and ' + (oldLeft.shared === 1 ? 'was' : 'were') + ' not copied' : ''].filter(Boolean).join('; ') +
+        '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
+        // Not while old presets still wait to be copied: removing would lose them.
+        (notMigrated ? ' (Remove is offered once the waiting presets are copied.)' : ' <button type="button" class="btn small" data-act="old-rm">Remove old data</button>') + '</div>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
-      '<p id="pe-status" class="small" role="status" tabindex="-1">' + esc(status) + '</p>' +
+      '<p id="pe-status" class="small" tabindex="-1">' + esc(status) + '</p>' +
       (editing ? editorHtml(ds) : '') +
       '<div class="dialog-actions"><button type="button" class="btn" data-act="close">Close</button></div>';
     if (editing) showErrors();
     var f = focusSel && dlg.querySelector(focusSel);
     if (f) f.focus();
+    announce(status);
   }
 
   // A selector for the focused control, so a redraw can put focus back.
@@ -356,7 +380,7 @@
       return;
     }
     editing = null;
-    status = 'Saved "' + t.name + '".';
+    status = memoryOnly ? 'Saved "' + t.name + '" for this visit only: this browser is not saving presets, so download it to keep it.' : 'Saved "' + t.name + '".';
     if (andUse) Alpha.settings.useScheme(t.id); else Alpha.settings.notify();
     render('#pe-status');
   }
@@ -411,6 +435,7 @@
     else if (act === 'download') download(p);
     else if (act === 'old-dl') downloadOld();
     else if (act === 'old-rm') {
+      if (notMigrated) return; // presets still waiting to be copied would be lost
       if (!window.confirm('Remove the old presets data (alpha.presets and alpha.presets-unreadable)? Presets already moved to the new storage stay. This cannot be undone (download it first to keep a copy).')) return;
       store.remove('presets'); store.remove('presets-unreadable');
       loadMine();

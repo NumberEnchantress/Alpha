@@ -37,7 +37,28 @@
   function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B\u200C\uFEFF]+/g, ' ').trim() : ''; }
   // The form used to compare names and labels: also folds compatibility
   // forms (fullwidth letters, ligatures such as "ﬁ") and case.
-  function sameKey(s) { return clean(s).normalize('NFKC').toLowerCase(); }
+  // Letters from other alphabets that look like Latin letters, mapped to
+  // them for comparing (Cyrillic, Greek and Armenian look-alikes), so a label
+  // written wholly in Cyrillic "\u0410\u041C" compares equal to "AM".
+  var SKELETON = {
+    '\u0410': 'A', '\u0412': 'B', '\u0415': 'E', '\u041A': 'K', '\u041C': 'M', '\u041D': 'H', '\u041E': 'O', '\u0420': 'P', '\u0421': 'C', '\u0422': 'T',
+    '\u0425': 'X', '\u0423': 'Y', '\u0406': 'I', '\u0408': 'J', '\u0405': 'S', '\u051A': 'Q', '\u051C': 'W', '\u0417': '3',
+    '\u0430': 'a', '\u0435': 'e', '\u043E': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u0456': 'i', '\u0458': 'j',
+    '\u0455': 's', '\u0501': 'd', '\u051B': 'q', '\u051D': 'w', '\u04BB': 'h', '\u04CF': 'l', '\u0432': 'b', '\u043A': 'k', '\u043C': 'm',
+    '\u043D': 'h', '\u0442': 't',
+    '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039A': 'K', '\u039C': 'M', '\u039D': 'N',
+    '\u039F': 'O', '\u03A1': 'P', '\u03A4': 'T', '\u03A5': 'Y', '\u03A7': 'X', '\u03BF': 'o', '\u03BD': 'v', '\u03B9': 'i', '\u03BA': 'k',
+    '\u03C1': 'p', '\u03C5': 'u', '\u03B1': 'a', '\u03F2': 'c', '\u03F3': 'j',
+    '\u0555': 'O', '\u0585': 'o', '\u057D': 'u', '\u0581': 'g', '\u0570': 'h', '\u0578': 'n', '\u0566': 'q', '\u054D': 'U', '\u0544': 'U'
+  };
+  var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+  // The form used to compare names and labels: compatibility forms folded
+  // (fullwidth letters, ligatures such as "\uFB01"), invisible characters
+  // dropped (a joiner between two emoji too), look-alike letters mapped,
+  // and case ignored.
+  function sameKey(s) {
+    return clean(s).normalize('NFKC').replace(IGNORABLE, '').replace(/[^\x00-\x7F]/g, function (c) { return SKELETON[c] || c; }).toLowerCase();
+  }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
@@ -46,14 +67,17 @@
   var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{13430}-\u{1343F}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
   // Emoji joined by zero-width joiners, with their variation selectors, are visible.
   var EMOJI = /\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
-  function invisible(s) { return isStr(s) && INVISIBLE.test(s.replace(EMOJI, 'E')); }
+  // Also refused: any format character, unassigned or private-use code point,
+  // and control code other than spacing (a joiner inside an emoji is fine).
+  var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
+  function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E'); return INVISIBLE.test(t) || HIDDEN.test(t); }
   // What is wrong with a piece of text that looks fine, or null.
   function textProblem(s) {
     if (!isStr(s)) return null;
     if (invisible(s)) return 'contains invisible characters; type it again';
     if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
     if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
-    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u].filter(function (re) { return re.test(s); });
+    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u].filter(function (re) { return re.test(s); });
     if (scripts.length > 1) return 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters), which can look like other text; type it again';
     return null;
   }
@@ -68,7 +92,8 @@
   // A name that contains one standard colour word ("Navy blue", "Light
   // grey") must be that kind of colour: the same hue family for colours,
   // dark for black, light for white, unsaturated for grey.
-  var FAMILY = { red: [345, 20], orange: [15, 45], yellow: [40, 70], green: [70, 170], blue: [170, 255], purple: [255, 300], pink: [300, 350] };
+  // Hue ranges in degrees; pink also covers light reds (#ffc0cb), red only the darker ones.
+  var FAMILY = { red: [340, 20], orange: [15, 45], yellow: [40, 70], green: [70, 170], blue: [170, 255], purple: [255, 320], pink: [280, 20] };
   function hsl(hex) {
     var c = rgb(hex).map(function (v) { return v / 255; }), max = Math.max.apply(null, c), min = Math.min.apply(null, c), l = (max + min) / 2, d = max - min, h = 0;
     var s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
@@ -85,6 +110,8 @@
     if (w === 'grey') return s > 0.25 && l > 0.1 && l < 0.9;
     var f = FAMILY[w];
     if (s < 0.2 || l < 0.08 || l > 0.95) return true; // too grey, dark or light to be a colour
+    if (w === 'red' && l > 0.7) return true;  // that light, it is pink
+    if (w === 'pink' && (h >= 340 || h < 20) && l < 0.55) return true; // that dark a red is not pink
     return f[0] < f[1] ? !(h >= f[0] && h < f[1]) : !(h >= f[0] || h < f[1]);
   }
 
@@ -109,8 +136,8 @@
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       var std = standard(name);
-      if (std && distance(std.hex, c.hex) >= 80) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + name.toLowerCase() + '.');
-      else if (!std && wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like its name.');
+      // A colour named with a colour word ("Blue", "Navy blue") must be that kind of colour.
+      if (wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + (std ? name.toLowerCase() : 'its name') + '.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
       if (names[sameKey(name)]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];

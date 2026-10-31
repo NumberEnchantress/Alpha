@@ -9,6 +9,7 @@
 (function (Alpha) {
   'use strict';
   var esc = Alpha.ui.esc;
+  var minFont = Infinity, minW = 0, minH = 0, mapRO = null, box = null;
   var el = null, svg = null, layout = null, marker = null, markerEst = null, markerRing = null, title = null, lastHi = [];
   var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
 
@@ -26,13 +27,14 @@
     return Math.max(2 * k, Math.min(3.6 * k, byW, byH));
   }
   function label(r, text) {
-    var cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-    return '<text x="' + cx + '" y="' + cy + '" font-size="' + fontFor(r, text) + '"' +
+    var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text);
+    if (f < minFont) minFont = f;
+    return '<text x="' + cx + '" y="' + cy + '" font-size="' + f + '"' +
       (vertical(r) ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '') + '>' + esc(text) + '</text>';
   }
 
   function init(container, lay) {
-    el = container; layout = lay;
+    el = container; layout = lay; minFont = Infinity;
     title = document.getElementById('map-title');
     var W = lay.width, D = lay.depth, parts = [];
     k = Math.max(W, D) / 100;
@@ -67,6 +69,16 @@
     marker = el.querySelector('#map-marker');
     markerEst = marker.querySelector('.marker-est');
     markerRing = marker.querySelector('.marker-ring');
+    // The smallest text on the map (unit and feature labels, and YOU / EST.
+    // at 2.3 x k) sets the smallest size the map is drawn at: 11 px. A pane
+    // smaller than that scrolls, and keeps the marker in view.
+    var smallest = Math.min(minFont, 2.3 * k), per = 11 / smallest;
+    minW = (W + 2 * k) * per; minH = (D + 2 * k) * per;
+    svg.style.minWidth = Math.ceil(minW) + 'px'; svg.style.minHeight = Math.ceil(minH) + 'px';
+    if (window.ResizeObserver && !mapRO) {
+      mapRO = new ResizeObserver(function (en) { var r = en[0].contentRect; box = { w: r.width, h: r.height }; });
+      mapRO.observe(el);
+    }
   }
 
   // A thick strip on the side the unit is approached from.
@@ -132,18 +144,19 @@
             markerEst.setAttribute('visibility', 'visible');
           } else markerRing.setAttribute('visibility', 'visible'); // no free spot: a dashed ring says "estimated"
         }
-        if (narrow.matches) scrollToX(p[0]);
+        if (box && (box.w < minW - 1 || box.h < minH - 1)) scrollTo(p);
       }
     }
   }
 
-  // At phone width the map scrolls sideways (see app.css); bring the marker
-  // into view. Only then, so wide screens never pay for a layout read.
-  var narrow = window.matchMedia ? window.matchMedia('(max-width: 760px)') : { matches: false };
-  function scrollToX(x) {
-    var w = el.scrollWidth, v = el.clientWidth;
-    if (w <= v) return;
-    el.scrollLeft = Math.max(0, Math.min(w - v, (x + k) / (layout.width + 2 * k) * w - v / 2));
+  // When the pane is smaller than the map's smallest size, it scrolls: bring
+  // the marker to the middle. Sizes come from the ResizeObserver, so this
+  // reads no layout.
+  function scrollTo(p) {
+    var W = layout.width + 2 * k, D = layout.depth + 2 * k;
+    var sw = Math.max(box.w, minW), sh = Math.max(box.h, minH), s = Math.min(sw / W, sh / D);
+    var x = (sw - W * s) / 2 + (p[0] + k) * s, y = (sh - D * s) / 2 + (p[1] + k) * s;
+    el.scrollLeft = Math.max(0, x - box.w / 2); el.scrollTop = Math.max(0, y - box.h / 2);
   }
 
   // Where the EST. tag goes, relative to the marker (standard units): the
