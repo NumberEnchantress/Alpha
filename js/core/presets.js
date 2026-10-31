@@ -13,7 +13,7 @@
 
   var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 2;
   var MAX_NAME = 60, MAX_LABEL = 40, MAX_COLOUR_NAME = 24, MAX_FILE_BYTES = 256 * 1024;
-  var MIN_COLOUR_DISTANCE = 40; // RGB distance below which two colours look alike
+  var MIN_COLOUR_DISTANCE = 60; // RGB distance below which two colours look alike
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
 
   // Colours offered in the editor, besides any a preset already uses.
@@ -31,10 +31,12 @@
   ];
 
   function isStr(s) { return typeof s === 'string'; }
-  function clean(s) { return isStr(s) ? s.trim() : ''; }
+  // Runs of spaces, tabs and zero-width characters look like one space on screen.
+  function clean(s) { return isStr(s) ? s.replace(/[\s\u200B-\u200D\uFEFF]+/g, ' ').trim() : ''; }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
   function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
+  function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE; }
   // A colour called by a standard name ("Black") must look like it.
   function standard(name) {
     var n = name.toLowerCase();
@@ -63,7 +65,7 @@
       if (std && distance(std.hex, c.hex) >= 80) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + name.toLowerCase() + '.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
       if (names[name.toLowerCase()]) errors.push('Two colours are called "' + name + '".');
-      var near = seenHex.filter(function (s) { return distance(s.hex, c.hex) < MIN_COLOUR_DISTANCE; })[0];
+      var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];
       if (near) errors.push('The colours "' + near.name + '" and "' + name + '" look too alike to tell baskets apart.');
       colours[c.id] = c; names[name.toLowerCase()] = 1; seenHex.push({ hex: c.hex, name: name });
     });
@@ -145,7 +147,7 @@
     return out;
   }
 
-  return { check: check, tidy: tidy, toFile: toFile, fromFile: fromFile, slug: slug,
+  return { check: check, tidy: tidy, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
     MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });
