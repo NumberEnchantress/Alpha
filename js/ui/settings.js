@@ -25,7 +25,10 @@
       ('scale' in p && !SCALES.some(function (x) { return x[0] === p.scale; })) ||
       ('disabled' in p && !plain(p.disabled)) ||
       // each custom rule must be a rule: an object with a text id, a message and a condition
-      ('custom' in p && (!Array.isArray(p.custom) || !p.custom.every(function (r) { return plain(r) && typeof r.id === 'string' && r.id && typeof r.message === 'string' && plain(r.when); })));
+      ('custom' in p && (!Array.isArray(p.custom) || !p.custom.every(function (r) {
+        // the same checks as rules in the data file
+        return plain(r) && typeof r.id === 'string' && r.id && !Alpha.rules.compile([r], Alpha.rules.PRODUCT_FIELDS).errors.length;
+      })));
   }
   function keepCopy(raw) {
     for (var i = 1; i <= 20; i++) {
@@ -96,11 +99,11 @@
   // Plain-English version of any rule condition.
   function describe(c) {
     if (!c || typeof c !== 'object') return '?';
-    if (c.all) return c.all.map(describe).join(', and ');
-    if (c.any) return '(' + c.any.map(describe).join(', or ') + ')';
+    if (Array.isArray(c.all)) return c.all.map(describe).join(', and ');
+    if (Array.isArray(c.any)) return '(' + c.any.map(describe).join(', or ') + ')';
     if (c.not) return 'not (' + describe(c.not) + ')';
     if (c.equivalent) {
-      return 'another NDC with the same ' + (c.equivalent.match || []).join(', ') +
+      return 'another NDC with the same ' + (Array.isArray(c.equivalent.match) ? c.equivalent.match : []).join(', ') +
         (c.equivalent.where ? ' has ' + describe(c.equivalent.where) : ' exists');
     }
     var v = Array.isArray(c.value) ? (c.op === 'between' ? c.value.join(' and ') : c.value.join(', ')) : c.value;

@@ -49,7 +49,18 @@
     '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039A': 'K', '\u039C': 'M', '\u039D': 'N',
     '\u039F': 'O', '\u03A1': 'P', '\u03A4': 'T', '\u03A5': 'Y', '\u03A7': 'X', '\u03BF': 'o', '\u03BD': 'v', '\u03B9': 'i', '\u03BA': 'k',
     '\u03C1': 'p', '\u03C5': 'u', '\u03B1': 'a', '\u03F2': 'c', '\u03F3': 'j',
-    '\u0555': 'O', '\u0585': 'o', '\u057D': 'u', '\u0581': 'g', '\u0570': 'h', '\u0578': 'n', '\u0566': 'q', '\u054D': 'U', '\u0544': 'U'
+    '\u0555': 'O', '\u0585': 'o', '\u057D': 'u', '\u0581': 'g', '\u0570': 'h', '\u0578': 'n', '\u0566': 'q', '\u054D': 'U', '\u0544': 'U',
+    // Latin small capitals and dotless letters, Cherokee, Lisu, Coptic
+    '\u0131': 'i', '\u01C0': 'l', '\u0237': 'j', '\u0251': 'a', '\u0261': 'g', '\u0262': 'g', '\u026A': 'i', '\u0274': 'n', '\u0280': 'r', '\u028F': 'y',
+    '\u0299': 'b', '\u029C': 'h', '\u029F': 'l', '\u13A0': 'D', '\u13A1': 'E', '\u13A2': 'T', '\u13AA': 'A', '\u13AB': 'J', '\u13AC': 'O', '\u13B3': 'W',
+    '\u13B7': 'M', '\u13BB': 'H', '\u13C0': 'G', '\u13C3': 'Z', '\u13D2': 'R', '\u13D9': 'V', '\u13DA': 'S', '\u13DE': 'L', '\u13DF': 'C', '\u13E2': 'P',
+    '\u13E6': 'K', '\u13E7': 'd', '\u13F4': 'B', '\u1D00': 'a', '\u1D04': 'c', '\u1D05': 'd', '\u1D07': 'e', '\u1D0A': 'j', '\u1D0B': 'k', '\u1D0D': 'm',
+    '\u1D0F': 'o', '\u1D18': 'p', '\u1D1B': 't', '\u1D1C': 'u', '\u1D20': 'v', '\u1D21': 'w', '\u1D22': 'z', '\u2C80': 'A', '\u2C81': 'a', '\u2C82': 'B',
+    '\u2C88': 'E', '\u2C8E': 'H', '\u2C92': 'I', '\u2C94': 'K', '\u2C98': 'M', '\u2C9A': 'N', '\u2C9E': 'O', '\u2C9F': 'o', '\u2CA2': 'P', '\u2CA3': 'p',
+    '\u2CA4': 'C', '\u2CA5': 'c', '\u2CA6': 'T', '\u2CA8': 'Y', '\u2CAC': 'X', '\uA4D0': 'B', '\uA4D1': 'P', '\uA4D3': 'D', '\uA4D4': 'T', '\uA4D6': 'G',
+    '\uA4D7': 'K', '\uA4D9': 'J', '\uA4DA': 'C', '\uA4DC': 'Z', '\uA4DD': 'F', '\uA4DF': 'M', '\uA4E0': 'N', '\uA4E1': 'L', '\uA4E2': 'S', '\uA4E3': 'R',
+    '\uA4E6': 'V', '\uA4E7': 'H', '\uA4EA': 'W', '\uA4EB': 'X', '\uA4EC': 'Y', '\uA4EE': 'A', '\uA4F0': 'E', '\uA4F2': 'I', '\uA4F3': 'O', '\uA4F4': 'U',
+    '\uA731': 's'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -77,7 +88,7 @@
     if (invisible(s)) return 'contains invisible characters; type it again';
     if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
     if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
-    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u].filter(function (re) { return re.test(s); });
+    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u, /\p{Script=Lisu}/u].filter(function (re) { return re.test(s); });
     if (scripts.length > 1) return 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters), which can look like other text; type it again';
     return null;
   }
@@ -101,8 +112,10 @@
     return [(h + 360) % 360, s, l];
   }
   function wordMismatch(name, hex) {
-    var words = name.toLowerCase().split(/[^a-z]+/).map(function (w) { return w === 'gray' ? 'grey' : w; });
-    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) { return words.indexOf(id) >= 0; });
+    var words = sameKey(name).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
+    // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
+    var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
+    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) { return words.some(function (w) { return w.indexOf(STEM[id]) === 0; }); });
     if (found.length !== 1) return false; // none, or a mix such as "blue-green"
     var w = found[0], v = hsl(hex), h = v[0], s = v[1], l = v[2];
     if (w === 'black') return l > 0.3;

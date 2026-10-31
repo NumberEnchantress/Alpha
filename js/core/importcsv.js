@@ -58,7 +58,18 @@
         var c = b[i];
         if ((c < 9 || (c > 13 && c < 32) || c === 127) && !(c === 26 && i === b.length - 1)) ctl++; // a final Ctrl-Z (old DOS end mark) is fine
       }
-      return ctl > 0 ? { problem: 'This is not a text file (it looks like an image, a PDF or another kind of file), so it is not a CSV.' } : null;
+      if (!ctl) return null;
+      if (ctl <= 3 || ctl * 100 < n - from) {
+        // A text file with a stray control character (some barcode scanners add one): name the line.
+        for (var j = from, line = 1; j < b.length; j++) {
+          var cj = b[j];
+          if (cj === 10) line++;
+          else if ((cj < 9 || (cj > 13 && cj < 32) || cj === 127) && !(cj === 26 && j === b.length - 1)) {
+            return { problem: 'Line ' + line + ' holds an invisible control character (code ' + cj + '), as some barcode scanners add. Remove it and import again.' };
+          }
+        }
+      }
+      return { problem: 'This is not a text file (it looks like an image, a PDF or another kind of file), so it is not a CSV.' };
     }
     if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) return { problem: 'This is an Excel workbook (.xlsx) or another zipped file, not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
     if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return { problem: 'This is an old Excel workbook (.xls), not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
@@ -66,6 +77,9 @@
       // A UTF-8 mark followed by bytes that are not UTF-8: read the rest as Windows-1252, and say so.
       try { return { text: dec('utf-8', 3, true), encoding: 'UTF-8' }; }
       catch (e) { return binary(3) || { text: dec('windows-1252', 3), encoding: 'Windows-1252', note: 'This file starts with a UTF-8 mark but is not UTF-8, so it was read as Windows-1252. Check that accented letters and symbols such as µ look right.' }; }
+    }
+    if ((b[0] === 0xFF && b[1] === 0xFE && b[2] === 0 && b[3] === 0) || (b[0] === 0 && b[1] === 0 && b[2] === 0xFE && b[3] === 0xFF)) {
+      return { problem: 'This file is in UTF-32, which Alpha does not read. Save it as "CSV UTF-8" and import again.' };
     }
     if (b[0] === 0xFF && b[1] === 0xFE) return { text: dec('utf-16le', 2), encoding: 'UTF-16' };
     if (b[0] === 0xFE && b[1] === 0xFF) return { text: dec('utf-16be', 2), encoding: 'UTF-16' };
@@ -117,6 +131,15 @@
     var t = String(text || '').replace(/﻿/g, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
     var out = [], prev = 0, l = 1, expected = null, problem = null;
     var lastLine = t.split('\n').length - (/\n$/.test(t) ? 1 : 0);
+    // A file written with a space after each delimiter ("a, b, c"): CSV does not
+    // read a quote after a space as a quote, so quoted values would be cut or
+    // merged. Such a file with any quote mark is refused.
+    var head = t.split('\n').filter(function (x) { return x.trim(); })[0] || '';
+    var parts = head.split(delim);
+    if (parts.length > 1 && parts.slice(1).every(function (x) { return /^ /.test(x); }) && t.indexOf('"') >= 0) {
+      var ql = t.slice(0, t.indexOf('"')).split('\n').length;
+      return { rows: [], empty: false, lastLine: lastLine, problem: { line: ql, why: 'this file is written with a space after each comma and uses quote marks, which CSV does not read as quotes after a space, so values could be cut or merged. Save it as a standard CSV (Excel: File > Save As > CSV UTF-8), or remove the quote marks' } };
+    }
     Papa.parse(t, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
       var cur = r.meta.cursor, cells = r.data;
       var inner = cells.join('').split('\n').length - 1;
@@ -162,14 +185,20 @@
       'Fix that line (in the spreadsheet, or in a text editor) and import again; until then the data in use stays as it is.';
   }
 
+  // Each field takes the column whose list names it; when two headers name the
+  // same field ("Product" and "Description"), the one earlier in that list wins.
   function mapColumns(fields) {
-    var map = {}, unused = [];
-    fields.forEach(function (f) {
-      var k = key(f), hit = null;
-      Object.keys(COLUMNS).forEach(function (c) { if (!hit && COLUMNS[c].indexOf(k) >= 0 && !map[c]) hit = c; });
-      if (hit) map[hit] = f; else unused.push(f);
+    var map = {}, rank = {}, used = {};
+    fields.forEach(function (f, i) {
+      var k = key(f);
+      Object.keys(COLUMNS).forEach(function (c) {
+        var r = COLUMNS[c].indexOf(k);
+        if (r >= 0 && !used[i] && (!(c in map) || r < rank[c])) { if (c in map) used[map[c + '#']] = false; map[c] = f; map[c + '#'] = i; rank[c] = r; used[i] = true; }
+      });
     });
-    return { map: map, unused: unused };
+    var out = {}; Object.keys(map).forEach(function (c) { if (c.slice(-1) !== '#') out[c] = map[c]; });
+    var unused = fields.filter(function (f, i) { return !used[i]; });
+    return { map: out, unused: unused };
   }
 
   /* ---------- values ---------- */
@@ -246,9 +275,9 @@
     rows.forEach(function (r) { freq[r.count] = (freq[r.count] || 0) + 1; });
     Object.keys(freq).forEach(function (c) { if (freq[c] > (freq[mode] || 0)) mode = Number(c); });
     if (mode === width || freq[mode] * 2 <= rows.length) return null;
-    return 'Most rows (' + freq[mode] + ' of ' + rows.length + ') have ' + mode + ' fields, but the header has ' + width + ', so it cannot be known which values belong to which column. ' +
+    return 'Most rows (' + freq[mode] + ' of ' + rows.length + ', lines ' + rows[0].line + '-' + rows[rows.length - 1].line + ') have ' + mode + ' fields, but the header has ' + width + ', so it cannot be known which values belong to which column. ' +
       (mode > width ? 'Usually each line ends with a comma and the header does not: add ' + (mode - width) + ' comma' + (mode - width > 1 ? 's' : '') + ' to the end of the header line, or remove the trailing commas from the rows.'
-        : 'Usually the header ends with a comma the rows do not have: remove it from the header line.') +
+        : 'The header may end with a comma the rows do not have, or the rows may leave off empty values at the end: make the header and the rows match.') +
       ' Nothing was imported; fix the file and import again.';
   }
   var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|tab|tabs|cap|caps|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
@@ -314,12 +343,36 @@
     function fits(row) {
       return row.count === width && p.fields.every(function (f, i) { return f || blankCell(row.cells[i]); });
     }
+    // A line break typed into a value without quotes splits one row into a
+    // short row and its neighbour; the neighbour can have the right count with
+    // a cut-off value. So the rows just above and below a short row are
+    // skipped too.
+    var nearShort = {};
+    p.rows.forEach(function (r, i) {
+      if (r.count >= width) return;
+      var a = p.rows[i - 1], b = p.rows[i + 1];
+      if (a && a.endLine + 1 === r.line) nearShort[i - 1] = r.line;
+      if (b && r.endLine + 1 === b.line) nearShort[i + 1] = r.line;
+    });
+    // A second header (two exports pasted together): the same columns are
+    // skipped as a repeat; another order refuses the file.
+    var headKeys = p.fields.map(key).join(',');
+    function headerLike(r) {
+      var named = r.cells.filter(function (c) { var k = key(c); return k && Object.keys(COLUMNS).some(function (col) { return COLUMNS[col].indexOf(k) >= 0; }); });
+      return named.length >= 2 && !ndc.normalize(String(r.data[m.ndc] == null ? '' : r.data[m.ndc]));
+    }
+    for (var hi = 0; hi < p.rows.length; hi++) {
+      var hr = p.rows[hi];
+      if (headerLike(hr) && hr.cells.map(key).join(',') !== headKeys) {
+        return stop('Line ' + hr.line + ' looks like a second header with the columns in another order (two files pasted together?), so the rows after it cannot be matched to columns. Nothing was imported; import the parts as separate files.');
+      }
+    }
     function splitAt(row) {
       for (var i = 1; i < width; i++) if (spaced[i] && /^\s+\S/.test(String(row.cells[i] == null ? '' : row.cells[i]))) return i;
       return -1;
     }
 
-    p.rows.forEach(function (row) {
+    p.rows.forEach(function (row, rowIndex) {
       var r = row.data, line = row.line;
       var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
@@ -330,6 +383,7 @@
           : 'has a value under a column with no name, so its values may be shifted (an unquoted comma inside a value?) and cannot be matched to columns safely' });
         return;
       }
+      if (headerLike(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
       var sp = splitAt(row);
       if (sp > 0) {
         report.skipped.push({ row: line, ndc: rawNdc, reason: 'the "' + (p.fields[sp] || 'column ' + (sp + 1)) + '" value "' + String(row.cells[sp]).slice(0, 30) +
@@ -342,6 +396,10 @@
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
+      if (nearShort[rowIndex] != null) {
+        report.skipped.push({ row: line, ndc: rawNdc, reason: 'line ' + nearShort[rowIndex] + ' next to it has too few fields: a line break inside a value may have split a row there, so this row may be cut short' });
+        return;
+      }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       // A drug name with no letters ("060") is a value from another column: the row is shifted.
@@ -463,6 +521,12 @@
     if (l.problem) { report.problem = quoteProblem(l.problem, l.lastLine, 'used'); report.fatal = true; return report; }
     if (l.empty || !rows.length) { report.problem = 'The robot list is empty.'; report.fatal = true; return report; }
     var first = rows[0].cells, at = -1;
+    // A drug name next to the NDC is fine in a robot list; Location, Shelf or Robot columns mean a products file.
+    var looksProducts = first.map(key).filter(function (h) { return ['location', 'shelf', 'robot', 'preferred'].some(function (c) { return COLUMNS[c].indexOf(h) >= 0; }); });
+    if (looksProducts.length) {
+      report.problem = 'This looks like a products file (it has columns such as "' + first.filter(function (h) { return looksProducts.indexOf(key(h)) >= 0; }).slice(0, 2).join('", "') + '"), not a robot list, so it was not used. Choose the robot list (one column of NDCs) and import again.';
+      report.fatal = true; return report;
+    }
     first.map(key).forEach(function (h, i) { if (at < 0 && COLUMNS.ndc.indexOf(h) >= 0) at = i; });
     var looksLikeData = first.some(function (c) { c = String(c).trim(); return SCI.test(c) || /\d{5}/.test(c) || ndc.digits(c).length >= 10; });
     if (at >= 0) { col = at; start = 1; }

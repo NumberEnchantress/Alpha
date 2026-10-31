@@ -47,61 +47,75 @@
   }
   function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
-  // Version-14 to 16 kept all presets in one list under "alpha.presets".
-  // Copy readable ones to their own entries; the old list is left as is.
-  // It is marked done only when every one was copied, so a copy that did not
-  // fit (full storage) is tried again on every load, and the page says so.
-  // Nothing is dropped: an entry whose id is missing, malformed, a duplicate
-  // or already taken gets a new id (it is then listed as yours, or as
-  // unreadable with the reason). Entries that are not presets at all, a list
-  // that is not readable, and the backup version-16 kept
-  // ("alpha.presets-unreadable") are shown on the page, with Download and
-  // Remove. Versions 17-21 skipped some entries without a word; the
-  // "-2" flag makes this pass run once more for them (an entry already
-  // copied, same id and name, is not copied again).
+  /* Version-14 to 16 kept all presets in one list under "alpha.presets".
+     Each entry is MOVED: copied to its own entry, then taken out of the old
+     list. So an entry is moved once at most, and a preset deleted later has
+     nothing to come back from. An entry that does not fit (full storage)
+     stays in the old list and is tried again on the next load; nothing else
+     is retried. An entry already stored with the same contents counts as
+     moved (a move whose second step did not happen). Missing, bad, repeated
+     or taken ids get a new id.
+     Versions 17-21 copied entries with good ids but left the old list as it
+     was. With their flag ("alpha.presets-migrated") set, an entry whose id is
+     stored now counts as moved (renamed since, perhaps); an entry whose id is
+     not stored was deleted since, or was never copied (those versions could
+     skip it when storage was full): it is not brought back unasked, but kept
+     and shown with "Restore them". Entries that are not presets, an old list
+     that cannot be read, and the version-16 backup are shown too. */
   var notMigrated = 0, oldLeft = null;
   function freeId(name, used) {
     var base = 'user-' + P.slug(typeof name === 'string' ? name : 'old preset'), id = base, n = 2;
     while (used[id] || store.raw(KEY + id) != null) id = base + '-' + n++;
     return id;
   }
+  function contentKey(p) {
+    return JSON.stringify([P.sameKey(p.name), (Array.isArray(p.colours) ? p.colours : []).map(function (c) { return c && [c.id, String(c.hex).toLowerCase()]; }),
+      (Array.isArray(p.groups) ? p.groups : []).map(function (g) { return g && [P.sameKey(g.label), g.baskets]; })]);
+  }
+  function oldList() {
+    var raw = store.raw('presets'), v = null;
+    if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
+    return { raw: raw, list: Array.isArray(v) ? v : null };
+  }
+  function writeOld(keep) { return keep.length ? store.setRaw('presets', JSON.stringify(keep)) : (store.remove('presets'), true); }
   function migrateOldList() {
     notMigrated = 0; oldLeft = null;
-    var raw = store.raw('presets'), backup = store.raw('presets-unreadable'), v = null, notPresets = 0, shared = 0;
-    if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
-    var list = Array.isArray(v) ? v : [];
-    list.forEach(function (p) { if (!p || typeof p !== 'object' || Array.isArray(p)) notPresets++; });
-    var done = store.raw('presets-migrated-2');
-    if (done == null && list.length) {
-      // Versions 17-21 already copied entries with a good, unused id; those
-      // that are gone now were deleted since, and are not brought back. An
-      // entry whose id now holds a preset with another name was renamed since,
-      // or was a different preset that those versions skipped: it is not
-      // copied, but the page says so (it stays in the old data). Only what
-      // those versions skipped for a bad or repeated id is copied.
-      var ranBefore = store.raw('presets-migrated') != null, firstSeen = Object.create(null);
-      var used = builtInIds();
-      list.forEach(function (p) {
-        if (!p || typeof p !== 'object' || Array.isArray(p)) return;
-        var goodId = typeof p.id === 'string' && ID_RE.test(p.id) && !used[p.id];
-        var repeat = typeof p.id === 'string' && !!firstSeen[p.id];
-        if (typeof p.id === 'string') firstSeen[p.id] = 1;
-        var there = goodId ? store.raw(KEY + p.id) : null, q = null;
-        if (there != null) { try { q = JSON.parse(there); } catch (e) { q = null; } }
-        if (goodId && !repeat && q && q.name === p.name) { used[p.id] = 1; return; } // copied before
-        if (ranBefore && goodId && !repeat) { used[p.id] = 1; if (there != null) shared++; return; }
-        var id = goodId && there == null ? p.id : freeId(p.name, used);
-        used[id] = 1;
-        if (!store.set(KEY + id, Object.assign({}, p, { id: id }))) notMigrated++;
+    var o = oldList(), backup = store.raw('presets-unreadable');
+    var ranBefore = store.raw('presets-migrated') != null, notPresets = 0, unsure = 0;
+    if (o.list) {
+      var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false;
+      store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (q && typeof q === 'object') have[contentKey(q)] = 1; });
+      o.list.forEach(function (p) {
+        if (!p || typeof p !== 'object' || Array.isArray(p)) { notPresets++; keep.push(p); return; }
+        var goodId = typeof p.id === 'string' && ID_RE.test(p.id) && !used[p.id] && !seenIds[p.id];
+        if (typeof p.id === 'string') seenIds[p.id] = 1;
+        var stored = goodId && store.raw(KEY + p.id) != null;
+        if (have[contentKey(p)] || (ranBefore && stored)) { moved = true; return; } // already in the new storage
+        if (ranBefore && goodId && !stored) { unsure++; keep.push(p); return; }   // deleted since, or never copied: ask
+        var id = goodId && !stored ? p.id : freeId(p.name, used);
+        if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
+        else { notMigrated++; keep.push(p); }
       });
-      if (!notMigrated) store.setRaw('presets-migrated-2', JSON.stringify({ shared: shared }));
-    } else if (done != null) {
-      try { shared = Number(JSON.parse(done).shared) || 0; } catch (e) { shared = 0; }
+      if (moved) writeOld(keep);
     }
-    if (raw == null) shared = 0; // the old data was removed
-    if ((raw != null && !Array.isArray(v)) || notPresets || backup != null || shared) {
-      oldLeft = { unreadableList: raw != null && !Array.isArray(v), notPresets: notPresets, backup: backup != null, shared: shared };
+    if ((o.raw != null && !o.list) || notPresets || unsure || backup != null) {
+      oldLeft = { unreadableList: o.raw != null && !o.list, notPresets: notPresets, unsure: unsure, backup: backup != null };
     }
+  }
+  // "Restore them": the entries an older version may have copied, which are
+  // not stored now, are moved as new presets (with new ids).
+  function restoreOld() {
+    var o = oldList(); if (!o.list) return 0;
+    var used = builtInIds(), keep = [], n = 0, stored = Object.create(null);
+    store.keys(KEY).forEach(function (k) { stored[k.slice(KEY.length)] = 1; });
+    o.list.forEach(function (p) {
+      var candidate = p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && ID_RE.test(p.id) && !stored[p.id];
+      if (!candidate) { keep.push(p); return; }
+      var id = freeId(p.name, used);
+      if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; n++; } else keep.push(p);
+    });
+    writeOld(keep);
+    return n;
   }
   function downloadOld() {
     var a = document.createElement('a'), out = { 'alpha.presets': store.raw('presets'), 'alpha.presets-unreadable': store.raw('presets-unreadable') };
@@ -267,8 +281,9 @@
       (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha could not all be read: ' +
         [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + ' entr' + (oldLeft.notPresets === 1 ? 'y is' : 'ies are') + ' not presets' : '',
           oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : '',
-          oldLeft.shared ? oldLeft.shared + ' old preset' + (oldLeft.shared === 1 ? ' has' : 's have') + ' the id of a preset you have now under another name (renamed since, or a different preset) and ' + (oldLeft.shared === 1 ? 'was' : 'were') + ' not copied' : ''].filter(Boolean).join('; ') +
+          oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now: deleted since, or that version could not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') : ''].filter(Boolean).join('; ') +
         '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
+        (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore them</button>' : '') +
         // Not while old presets still wait to be copied: removing would lose them.
         (notMigrated ? ' (Remove is offered once the waiting presets are copied.)' : ' <button type="button" class="btn small" data-act="old-rm">Remove old data</button>') + '</div>' : '') +
       listHtml(ds) +
@@ -434,9 +449,15 @@
     else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = cut(uniqueName('Copy of ' + p.name), P.MAX_NAME); startEdit(c, null); }
     else if (act === 'download') download(p);
     else if (act === 'old-dl') downloadOld();
+    else if (act === 'old-restore') {
+      var got = restoreOld(); loadMine(); Alpha.settings.notify();
+      status = got ? 'Restored ' + got + ' preset' + (got === 1 ? '' : 's') + ' from the older version.' : 'Nothing could be restored (this browser\'s storage may be full).';
+      render('#pe-status');
+    }
     else if (act === 'old-rm') {
       if (notMigrated) return; // presets still waiting to be copied would be lost
-      if (!window.confirm('Remove the old presets data (alpha.presets and alpha.presets-unreadable)? Presets already moved to the new storage stay. This cannot be undone (download it first to keep a copy).')) return;
+      var lost = oldLeft ? [oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' not in your list now' : '', oldLeft.notPresets ? oldLeft.notPresets + ' entr' + (oldLeft.notPresets === 1 ? 'y' : 'ies') + ' that are not presets' : '', oldLeft.backup ? 'the older backup' : '', oldLeft.unreadableList ? 'the unreadable old list' : ''].filter(Boolean).join(', ') : '';
+      if (!window.confirm('Remove the old presets data? This removes ' + (lost || 'it') + '. Presets in your list stay. This cannot be undone (download it first to keep a copy).')) return;
       store.remove('presets'); store.remove('presets-unreadable');
       loadMine();
       status = 'Removed the old presets data.';

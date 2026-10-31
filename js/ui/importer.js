@@ -57,7 +57,11 @@
       if (!pf && !rf) { status.textContent = 'Choose a products CSV, a robot list, or both.'; return; }
       status.textContent = 'Importing… (a large file can take a few seconds)';
       setTimeout(function () { run(pf, rf); }, 30); // let the status show before the work starts
-    }).catch(function (e) { status.textContent = e.message; });
+    }).catch(function (e) {
+      status.textContent = e.message;
+      var old = el.querySelector('#imp-report'); if (old) old.remove();
+      lastReport = null; store.remove('importReport');
+    });
   }
 
   // Builds the import. A file that is refused, or that gives no products,
@@ -90,6 +94,7 @@
     else if (pf && productsOk && listInUse && listInUse.ndcs && listInUse.ndcs.length) {
       // A new products file alone: the robot list in use is applied to it again.
       var again = Alpha.importcsv.applyRobotList('NDC\n' + listInUse.ndcs.map(Alpha.ndc.format).join('\n') + '\n', products, layout, { preferred: true, lineOf: lineOf });
+      ['notes', 'skipped', 'notFound'].forEach(function (k) { again[k].forEach(function (x) { x.row = '-'; }); }); // no file of its own: no line numbers
       if (!again.fatal) { report.robot = again; report.robotFile = listInUse.source + ' (the robot list in use, applied again)'; robotPrior = again.prior; robotList = listInUse; }
       else report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so it was not applied; import a robot list again if needed.';
     }
@@ -101,7 +106,7 @@
       var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
         productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior, robotList: robotList });
-      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes. Use "Download as data file" to keep it.';
+      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes, and an import saved earlier was removed from this browser so it cannot come back in its place. Use "Download as data file" to keep it.';
     } else {
       report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
     }
@@ -149,9 +154,19 @@
   function downloadReport() {
     var rep = lastReport, out = [['file', 'kind', 'line', 'ndc', 'text']];
     if (!rep) return;
-    var q = function (v) { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var q = function (v) {
+      v = String(v == null ? '' : v);
+      if (/^[=+\-@\t]/.test(v)) v = "'" + v; // not a formula when opened in a spreadsheet
+      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    if (rep.robotNotUsed) out.push(['', 'not applied', '', '', rep.robotNotUsed]);
+    if (rep.robotAgainNote) out.push(['', 'note', '', '', rep.robotAgainNote]);
+    if (rep.storedNote) out.push(['', 'saved', '', '', rep.storedNote]);
     if (rep.products) {
       if (rep.products.problem) out.push([rep.productsFile, 'problem', '', '', rep.products.problem]);
+      if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + ' rows read, ' + rep.products.imported + ' imported, ' + rep.products.skipped.length + ' skipped']);
+      (rep.products.fileNotes || []).forEach(function (n) { out.push([rep.productsFile, 'file note', '', '', n]); });
+      if (rep.productsEncoding && rep.productsEncoding.note) out.push([rep.productsFile, 'encoding', '', '', rep.productsEncoding.note]);
       rep.products.skipped.forEach(function (s) { out.push([rep.productsFile, 'not imported', s.row, s.ndc, s.reason]); });
       rep.products.notes.forEach(function (n) { out.push([rep.productsFile, 'note', n.row, n.ndc, n.note]); });
     }
@@ -186,7 +201,9 @@
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
       if (!p.fatal) {
-        h += '<p><strong>' + esc(rep.productsFile) + '</strong>: ' + p.rows + ' rows read, <strong>' + p.imported + ' imported</strong>, ' +
+        var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed); // read, but the other file was refused
+        h += '<p><strong>' + esc(rep.productsFile) + '</strong>' + (notApplied ? ' (read, not applied)' : '') + ': ' + p.rows + ' rows read, <strong>' +
+          p.imported + (notApplied ? ' would be imported' : ' imported') + '</strong>, ' +
           p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
         if (!p.imported) h += '<p class="note-bad">No rows could be imported, so the data in use was not changed.</p>';
       }
