@@ -134,17 +134,24 @@
 
   // Where the EST. tag goes, relative to the marker (standard units): the
   // first of below, right, left, above whose box overlaps no unit or feature.
-  var TAG_SPOTS = [[0, 4.9], [7.3, 0], [-7.3, 0], [0, -4.9]];
+  // The box is padded so the tag's outline never touches a unit's outline
+  // (Firefox counts strokes in element boxes; Chromium does not).
+  // If every spot touches something, the one with the least overlap wins.
+  var TAG_SPOTS = [[0, 4.9], [7.3, 0], [-7.3, 0], [0, -4.9], [-5.5, 4.9], [5.5, 4.9], [-5.5, -4.9], [5.5, -4.9]];
   function tagOffset(p) {
-    var boxes = [];
+    var boxes = [], best = 0, bestArea = Infinity;
     layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(u.rect); }); });
     (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
     for (var i = 0; i < TAG_SPOTS.length; i++) {
-      var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k, hw = 3.7 * k, hh = 1.55 * k;
-      var hit = boxes.some(function (r) { return cx + hw > r.x && cx - hw < r.x + r.w && cy + hh > r.y && cy - hh < r.y + r.h; });
-      if (!hit) return TAG_SPOTS[i];
+      var cx = p[0] + TAG_SPOTS[i][0] * k, cy = p[1] + TAG_SPOTS[i][1] * k, hw = 4.3 * k, hh = 2.1 * k, area = 0;
+      boxes.forEach(function (r) {
+        var w = Math.min(cx + hw, r.x + r.w) - Math.max(cx - hw, r.x), h = Math.min(cy + hh, r.y + r.h) - Math.max(cy - hh, r.y);
+        if (w > 0 && h > 0) area += w * h;
+      });
+      if (!area) return TAG_SPOTS[i];
+      if (area < bestArea) { bestArea = area; best = i; }
     }
-    return TAG_SPOTS[0];
+    return TAG_SPOTS[best];
   }
 
   function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
