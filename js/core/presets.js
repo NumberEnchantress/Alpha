@@ -73,7 +73,8 @@
     '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2212': '-', '\uFE63': '-', '\uFF0D': '-',
     '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'",
     '\u13A5': 'i', '\u13A9': 'y', '\u2CAD': 'x', '\u2CAC': 'X', '\u2015': '-', '\u2500': '-', '\u30FC': '-', '\u2215': '/', '\u2044': '/',
-    '\u2236': ':', '\u00D7': 'x', '\u3007': 'O'
+    '\u2236': ':', '\u00D7': 'x', '\u3007': 'O',
+    '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u222A': 'U', '\u2228': 'V', '\u13CF': 'b'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -93,7 +94,8 @@
     // Last, capital I and small l look the same in a sans-serif font ("Lab I",
     // "Lab l"): both compare as "l" (and so does i, to keep case ignored).
     var k = skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
-    return words ? k : k.replace(/i/g, 'l');
+    // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
+    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm');
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }

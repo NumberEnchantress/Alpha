@@ -116,7 +116,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Where the shelf pane scrolls (large text), its caption stays pinned to the
    pane's bottom, so the drug name moved off the drawing is never scrolled away. */
 @media (min-width: 761px) {
-  .elev > .elev-caption { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
+  .elev > .elev-caption { position: sticky; bottom: 0; z-index: 1; background: var(--panel); max-height: 45%; overflow-y: auto; }
   .elev > .elev-caption.estimated { background: var(--est); }
   .elev > .elev-caption.unknown { background: #eee; }
 }
@@ -231,7 +231,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 
 /* Import */
 .import-form { display: grid; gap: .4rem; }
-.import-form input[type=file] { font: inherit; display: block; margin-top: .15rem; }
+.import-form input[type=file] { font: inherit; display: block; margin-top: .15rem; max-width: 100%; min-width: 0; }
+.import-form label { min-width: 0; overflow-wrap: anywhere; }
 .import-report { border: 2px solid #333; border-radius: 6px; padding: .4rem .6rem; margin-top: .6rem; }
 .import-report h3 { margin: .2rem 0 .4rem; font-size: 1.05rem; }
 .import-report h4 { margin: .5rem 0 .2rem; font-size: .95rem; }

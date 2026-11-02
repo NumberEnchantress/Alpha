@@ -181,7 +181,7 @@
      renames only presets it saved itself, so the two never both rename.
      Called after this window's save and on every change from another window.
      Returns the messages to show. */
-  var mySaves = Object.create(null), lastArrowAt = 0;
+  var mySaves = Object.create(null), lastArrowAt = 0, justSaved = Object.create(null);
   function renameClashes() {
     var out = [];
     if (memoryOnly) return out;
@@ -493,6 +493,7 @@
       return;
     }
     mySaves[t.id] = 1;
+    justSaved[t.id] = { raw: store.raw(KEY + t.id), at: Date.now(), preset: JSON.parse(JSON.stringify(t)) };
     var renamed = renameClashes(), clash = renamed.length ? ' ' + renamed.join(' ') : '';
     if (renamed.length) { var now2 = find(Alpha.state.ds, t.id); if (now2) t.name = now2.name; }
     editing = null;
@@ -704,6 +705,18 @@
       Alpha.settings.notify();
       if (!dlg.open) return;
       if (renamed.length) { status = renamed.join(' '); redrawKeepingFocus(); return; }
+      // Another window saved its own edit to a preset this window saved a
+      // moment ago (both clicked Save at once): its version replaced ours. Ours
+      // is put back in the editor, so it is not lost unseen.
+      var jid = e.key && e.key.indexOf('alpha.' + KEY) === 0 ? e.key.slice(('alpha.' + KEY).length) : null, js = jid && justSaved[jid];
+      if (js && Date.now() - js.at < 5000 && e.newValue != null && e.newValue !== js.raw && !editing) {
+        delete justSaved[jid];
+        startEdit(js.preset, jid);
+        editing.base = js.raw; // so Save asks before replacing the other window's version
+        status = 'Another window saved its own changes to "' + js.preset.name + '" at the same moment, over yours. Your version is back in the editor: save it to keep it (you will be asked before replacing the other version), or Cancel to keep the other.';
+        render('#pe-status'); announce(status, true);
+        return;
+      }
       // The list is redrawn; an open draft is kept as it is (it lives in memory).
       if (editing && editing.origId && e.key === 'alpha.' + KEY + editing.origId) {
         status = e.newValue == null ? 'The preset you are editing was deleted in another window. Saving will ask before bringing it back.'

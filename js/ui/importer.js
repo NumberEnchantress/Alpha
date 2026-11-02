@@ -6,6 +6,11 @@
   var ui = Alpha.ui, esc = ui.esc, store = ui.store;
   var memory = null;      // imported state when it could not be saved
   var lastReport = store.get('importReport', null); // shown again when the dialog is rebuilt
+  // What was in use before the last import that changed the data, so it can be
+  // undone: { prev: the earlier import, or null for the store's own data }.
+  // Kept in this browser when there is room, else until the page is closed.
+  var undoState = null;
+  function undoInfo() { return undoState || store.get('importUndo', null); }
 
   function saved() { return memory || store.get('imported', null); }
 
@@ -102,7 +107,7 @@
       else {
         // Kept, not dropped: the next products file that has its NDCs gets it again.
         robotList = listInUse;
-        report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so no product is marked robot. The list is kept and will be applied again to the next products file; import a robot list to replace it.';
+        report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so it marks none of them (products marked by their own Robot column stay marked). The list is kept and will be applied again to the next products file; import a robot list to replace it.';
       }
     }
     var robotOk = !rf || (report.robot && !report.robot.fatal);
@@ -110,9 +115,13 @@
     var changed = productsOk && robotOk;
     if (pf && rf && productsOk && !robotOk) report.robotNotUsed = 'Neither file was used, because ' + rf.name + ' was refused; ' + pf.name + ' was read but not applied.';
     if (changed) {
+      var prevState = saved();
       var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
         productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior, robotList: robotList });
+      undoState = { prev: prevState || null };
+      if (!store.set('importUndo', undoState)) store.remove('importUndo');
+      report.canUndo = true;
       report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes, and an import saved earlier was removed from this browser so it cannot come back in its place. Use "Download as data file" to keep it.';
     } else {
       report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
@@ -125,8 +134,22 @@
     focusReport();
   }
 
+  // Puts back what was in use before the last import.
+  function undo() {
+    var u = undoInfo();
+    if (!u) return;
+    if (u.prev) keep(u.prev); else { memory = null; store.remove('imported'); }
+    undoState = null; store.remove('importUndo');
+    lastReport = { when: new Date().toLocaleString(), storedNote: 'Undone: the data in use is back to what it was before that import (' + (u.prev ? u.prev.source + ', imported ' + u.prev.when : 'the store\'s own data, no import') + ').' };
+    if (!store.set('importReport', lastReport)) store.remove('importReport');
+    Alpha.settings.reload();
+    Alpha.settings.open();
+    focusReport();
+  }
+
   function stop() {
     memory = null; store.remove('imported'); store.remove('importReport'); lastReport = null;
+    undoState = null; store.remove('importUndo');
     Alpha.settings.reload();
     Alpha.settings.open();
   }
@@ -173,7 +196,7 @@
     if (rep.products) {
       if (rep.products.problem) out.push([rep.productsFile, 'problem', '', '', rep.products.problem]);
       var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed);
-      if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + ' rows read, ' + rep.products.imported + (notApplied ? ' would be imported (not applied)' : ' imported') + ', ' + rep.products.skipped.length + ' skipped']);
+      if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + (rep.products.rows === 1 ? ' row read, ' : ' rows read, ') + rep.products.imported + (notApplied ? ' would be imported (not applied)' : ' imported') + ', ' + rep.products.skipped.length + ' skipped']);
       (rep.products.fileNotes || []).forEach(function (n) { out.push([rep.productsFile, 'file note', '', '', n]); });
       if (rep.productsEncoding && rep.productsEncoding.note) out.push([rep.productsFile, 'encoding', '', '', rep.productsEncoding.note]);
       (rep.products.misfits || []).forEach(function (s) { out.push([rep.productsFile, 'line to fix', s.row, '', s.why + ': ' + s.text]); });
@@ -214,7 +237,7 @@
       if (p.fatal && p.misfits && p.misfits.length) h += '<h4>Lines to fix</h4>' + table(p.misfits, [['row', 'Line'], ['why', 'Why'], ['text', 'The line']]);
       if (!p.fatal) {
         var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed); // read, but the other file was refused
-        h += '<p><strong>' + esc(rep.productsFile) + '</strong>' + (notApplied ? ' (read, not applied)' : '') + ': ' + p.rows + ' rows read, <strong>' +
+        h += '<p><strong>' + esc(rep.productsFile) + '</strong>' + (notApplied ? ' (read, not applied)' : '') + ': ' + p.rows + (p.rows === 1 ? ' row read, <strong>' : ' rows read, <strong>') +
           p.imported + (notApplied ? ' would be imported' : ' imported') + '</strong>, ' +
           p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
         if (!p.imported) h += '<p class="note-bad">No rows could be imported, so the data in use was not changed.</p>';
@@ -234,7 +257,7 @@
       if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       if (r.fatal) {
         var bad = r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; });
-        return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p>' + REPORT_BTN + '</div>';
+        return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p>' + undoBtn(rep) + REPORT_BTN + '</div>';
       }
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
@@ -245,10 +268,13 @@
       rrows.sort(function (a, b) { return (a.row === '-' ? 1e9 : a.row) - (b.row === '-' ? 1e9 : b.row); });
       h += table(rrows, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Note']]);
     }
-    return h + '<p class="small">' + esc(rep.storedNote) + '</p>' + REPORT_BTN + '</div>';
+    return h + '<p class="small">' + esc(rep.storedNote) + '</p>' + undoBtn(rep) + REPORT_BTN + '</div>';
   }
   // The whole report as a CSV file, for any import (long tables show their first rows only).
   var REPORT_BTN = '<p><button type="button" class="btn small" data-act="report-csv">Download the report (CSV)</button></p>';
+  function undoBtn(rep) {
+    return rep.canUndo && undoInfo() ? '<p><button type="button" class="btn small" data-act="import-undo">Undo this import</button> <span class="small muted">puts back the data in use before it' + (store.raw('importUndo') == null ? ' (until the page is closed)' : '') + '</span></p>' : '';
+  }
 
   function mount(el) {
     var s = saved();
@@ -269,7 +295,10 @@
     el.querySelector('#imp-go').addEventListener('click', function () { doImport(el); });
     var st = el.querySelector('#imp-stop');
     if (st) { st.addEventListener('click', stop); el.querySelector('#imp-dl').addEventListener('click', download); }
-    el.addEventListener('click', function (e) { if (e.target.closest('[data-act="report-csv"]')) downloadReport(); });
+    el.addEventListener('click', function (e) {
+      if (e.target.closest('[data-act="report-csv"]')) downloadReport();
+      else if (e.target.closest('[data-act="import-undo"]')) undo();
+    });
   }
 
   // After an import the dialog reopens; move focus to the report.
