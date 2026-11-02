@@ -74,7 +74,7 @@
     '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'",
     '\u13A5': 'i', '\u13A9': 'y', '\u2CAD': 'x', '\u2CAC': 'X', '\u2015': '-', '\u2500': '-', '\u30FC': '-', '\u2215': '/', '\u2044': '/',
     '\u2236': ':', '\u00D7': 'x', '\u3007': 'O',
-    '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u222A': 'U', '\u2228': 'V', '\u13CF': 'b'
+    '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u2D54': 'O','\u222A': 'U', '\u2228': 'V', '\u13CF': 'b'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -95,7 +95,9 @@
     // "Lab l"): both compare as "l" (and so does i, to keep case ignored).
     var k = skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
     // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
-    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm');
+    // (So "Mail" and "Mall" count as the same label: a refusal of two labels that
+    // look different is harmless, two that look alike passing is not.)
+    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w');
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
@@ -160,13 +162,15 @@
     // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
     var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
     // Other common colour words, by the standard colour they must look like.
-    var ALSO = { crimson: 'red', scarlet: 'red', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
+    var ALSO = { crimson: 'red', scarlet: 'red', wine: 'red', coral: 'orange', grape: 'purple', sand: 'yellow', beige: 'white', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
       navy: 'blue', azure: 'blue', cobalt: 'blue', sky: 'blue', teal: 'blue', turquois: 'blue', aqua: 'blue', cyan: 'blue', sapphire: 'blue',
       lime: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
       violet: 'purple', lavender: 'purple', lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
       magenta: 'pink', fuchsia: 'pink', rose: 'pink', salmon: 'pink',
       gold: 'yellow', lemon: 'yellow', mustard: 'yellow', khaki: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
       charcoal: 'grey', slate: 'grey', silver: 'grey', ivory: 'white', cream: 'white', snow: 'white', ebony: 'black', jet: 'black', onyx: 'black' };
+    // Olive lies between yellow and green: any hue from 40 to 170 degrees, not too dark or light.
+    if (words.some(function (w) { return w.indexOf('olive') === 0; })) { var ov = hsl(hex); return !(ov[0] >= 40 && ov[0] < 170 && ov[1] >= 0.2 && ov[2] > 0.08 && ov[2] < 0.75); }
     var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) {
       return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return ALSO[a] === id && w.indexOf(a) === 0; }); });
     });
@@ -183,10 +187,18 @@
   }
 
   // Problems with a preset, as plain sentences. Empty list = valid.
-  function check(p) {
-    var errors = [];
+  // opts.stored: a preset already stored (by this or an older version). Only
+  // its shape is checked, and duplicates by plain letters: the rules about
+  // look-alike text and colour names grew stricter over time, and a preset
+  // that was valid when saved must not turn unreadable after an update. They
+  // apply when a preset is saved or loaded from a file.
+  function check(p, opts) {
+    var errors = [], stored = !!(opts && opts.stored);
+    // (hidden characters are refused in stored presets too: they can disguise text)
+    var tp = stored ? function (x) { return invisible(x) ? 'contains invisible characters; type it again' : null; } : textProblem;
+    var K = stored ? function (x) { return clean(x).toLowerCase(); } : sameKey;
     if (!p || typeof p !== 'object' || Array.isArray(p)) return ['Not a preset.'];
-    if (textProblem(p.name)) errors.push('The name ' + textProblem(p.name) + '.');
+    if (tp(p.name)) errors.push('The name ' + tp(p.name) + '.');
     else if (!isStr(p.name) || blank(p.name)) errors.push('Give the preset a name.');
     else if (clean(p.name).length > MAX_NAME) errors.push('The name is longer than ' + MAX_NAME + ' characters.');
 
@@ -199,17 +211,17 @@
         return;
       }
       var name = clean(c.name);
-      if (textProblem(c.name)) { errors.push('The colour name "' + name.slice(0, 30) + '" ' + textProblem(c.name) + '.'); return; }
+      if (tp(c.name)) { errors.push('The colour name "' + name.slice(0, 30) + '" ' + tp(c.name) + '.'); return; }
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       var std = standard(name);
       // A colour named with a colour word ("Blue", "Navy blue") must be that kind of colour.
-      if (wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + (std ? name.toLowerCase() : 'its name') + '.');
+      if (!stored && wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + (std ? name.toLowerCase() : 'its name') + '.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
-      if (names[sameKey(name)]) errors.push('Two colours are called "' + name + '".');
+      if (names[K(name)]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];
-      if (near) errors.push('The colours "' + near.name + '" and "' + name + '" look too alike to tell baskets apart.');
-      colours[c.id] = c; names[sameKey(name)] = 1; seenHex.push({ hex: c.hex, name: name });
+      if (near && !stored) errors.push('The colours "' + near.name + '" and "' + name + '" look too alike to tell baskets apart.');
+      colours[c.id] = c; names[K(name)] = 1; seenHex.push({ hex: c.hex, name: name });
     });
 
     if (!Array.isArray(p.groups)) { errors.push('The preset has no group list.'); return errors; }
@@ -221,11 +233,11 @@
       var n = 'Group ' + (i + 1);
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
       var label = clean(g.label);
-      if (textProblem(g.label)) errors.push(n + ': the label ' + textProblem(g.label) + '.');
+      if (tp(g.label)) errors.push(n + ': the label ' + tp(g.label) + '.');
       else if (!isStr(g.label) || blank(g.label)) errors.push(n + ' needs a label.');
       else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
-      else if (labels[sameKey(label)]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[sameKey(label)] + '.');
-      else labels[sameKey(label)] = i + 1;
+      else if (labels[K(label)]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[K(label)] + '.');
+      else labels[K(label)] = i + 1;
       var b = g.baskets;
       if (!Array.isArray(b) || !b.every(isStr)) { errors.push(n + ': baskets must be a list of colour ids.'); return; }
       if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
