@@ -30,10 +30,7 @@
   // letters such as W, M, @ and Æ about 1 em); a label can be wider than its
   // box, and the EST. tag must not cover it.
   var textBoxes = [];
-  function textWidth(text) {
-    var w = 0; String(text).replace(/./gu, function (c) { w += /[WMÆŒ@%&]/.test(c) ? 1 : /[A-Z0-9#?]/.test(c) ? 0.72 : /[\s.,:;'!|ilI1]/.test(c) ? 0.35 : 0.62; return c; });
-    return w;
-  }
+  function textWidth(text) { return Alpha.ui.textEm(text); }
   function label(r, text) {
     var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text);
     if (f < minFont) minFont = f;

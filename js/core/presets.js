@@ -52,7 +52,7 @@
     '\u0555': 'O', '\u0585': 'o', '\u057D': 'u', '\u0581': 'g', '\u0570': 'h', '\u0578': 'n', '\u0566': 'q', '\u054D': 'U', '\u0544': 'U',
     // Latin small capitals and dotless letters, Cherokee, Lisu, Coptic
     '\u0131': 'i', '\u01C0': 'l', '\u0237': 'j', '\u0251': 'a', '\u0261': 'g', '\u0262': 'g', '\u026A': 'i', '\u0274': 'n', '\u0280': 'r', '\u028F': 'y',
-    '\u0299': 'b', '\u029C': 'h', '\u029F': 'l', '\u13A0': 'D', '\u13A1': 'E', '\u13A2': 'T', '\u13AA': 'A', '\u13AB': 'J', '\u13AC': 'O', '\u13B3': 'W',
+    '\u0299': 'b', '\u029C': 'h', '\u029F': 'l', '\u13A0': 'D', '\u13A1': 'R', '\u13A2': 'T', '\u13AA': 'A', '\u13AB': 'J', '\u13AC': 'E', '\u13B3': 'W',
     '\u13B7': 'M', '\u13BB': 'H', '\u13C0': 'G', '\u13C3': 'Z', '\u13D2': 'R', '\u13D9': 'V', '\u13DA': 'S', '\u13DE': 'L', '\u13DF': 'C', '\u13E2': 'P',
     '\u13E6': 'K', '\u13E7': 'd', '\u13F4': 'B', '\u1D00': 'a', '\u1D04': 'c', '\u1D05': 'd', '\u1D07': 'e', '\u1D0A': 'j', '\u1D0B': 'k', '\u1D0D': 'm',
     '\u1D0F': 'o', '\u1D18': 'p', '\u1D1B': 't', '\u1D1C': 'u', '\u1D20': 'v', '\u1D21': 'w', '\u1D22': 'z', '\u2C80': 'A', '\u2C81': 'a', '\u2C82': 'B',
@@ -65,7 +65,11 @@
     '\u04AE': 'Y', '\u04AF': 'y', '\u050C': 'G', '\u03F9': 'C', '\u2C99': 'm', '\u0196': 'I',
     '\u15EA': 'D', '\u15C5': 'A', '\u1455': 'C', '\u146D': 'P', '\u14AA': 'L', '\u157C': 'H', '\u15F7': 'B', '\u144E': 'N', '\u1515': 'S',
     '\u142F': 'V', '\u15EF': 'W', '\u15F0': 'M', '\u166D': 'X', '\u1541': 'x', '\u1587': 'R',
-    '\u04C0': 'I', '\u0474': 'V', '\u0475': 'v', '\uA646': 'I', '\uA647': 'i'
+    '\u04C0': 'I', '\u0474': 'V', '\u0475': 'v', '\uA646': 'I', '\uA647': 'i',
+    '\u03C7': 'x', '\u03C9': 'w', '\u043F': 'n', '\u0433': 'r', '\u044C': 'b', '\u10BD': 'S',
+    // dashes and apostrophes that look like "-" and "'"
+    '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2212': '-', '\uFE63': '-', '\uFF0D': '-',
+    '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'"
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -92,11 +96,14 @@
   // So are keycaps ("1" + U+FE0F + U+20E3) and tag-sequence flags (England, Scotland, Wales).
   // Only the three flags made of tag characters exist (England, Scotland, Wales);
   // any other run of tag characters is hidden text.
-  var EMOJI = /[0-9#*]\uFE0F?\u20E3|\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
+  var EMOJI = /[0-9#*]\uFE0F?\u20E3|\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|\p{Extended_Pictographic}(?:\p{Emoji_Modifier}|[\uFE0E\uFE0F])*(?:\u200D\p{Extended_Pictographic}(?:\p{Emoji_Modifier}|[\uFE0E\uFE0F])*)*/gu;
+  // A joiner or non-joiner between two letters of a script that uses them
+  // (Hindi conjuncts, Persian words) is part of writing it, not hidden text.
+  var JOINING = /(\p{Script=Arabic}|\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam}|\p{Script=Sinhala}|\p{Script=Syriac})[\u200C\u200D](?=\p{Script=Arabic}|\p{Script=Devanagari}|\p{Script=Bengali}|\p{Script=Gurmukhi}|\p{Script=Gujarati}|\p{Script=Oriya}|\p{Script=Tamil}|\p{Script=Telugu}|\p{Script=Kannada}|\p{Script=Malayalam}|\p{Script=Sinhala}|\p{Script=Syriac})/gu;
   // Also refused: any format character, unassigned or private-use code point,
   // and control code other than spacing (a joiner inside an emoji is fine).
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
-  function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E'); return INVISIBLE.test(t) || HIDDEN.test(t); }
+  function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E').replace(JOINING, '$1'); return INVISIBLE.test(t) || HIDDEN.test(t); }
   // What is wrong with a piece of text that looks fine, or null.
   function textProblem(s) {
     if (!isStr(s)) return null;
@@ -144,10 +151,10 @@
     // Other common colour words, by the standard colour they must look like.
     var ALSO = { crimson: 'red', scarlet: 'red', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
       navy: 'blue', azure: 'blue', cobalt: 'blue', sky: 'blue', teal: 'blue', turquois: 'blue', aqua: 'blue', cyan: 'blue', sapphire: 'blue',
-      lime: 'green', olive: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
+      lime: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
       violet: 'purple', lavender: 'purple', lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
       magenta: 'pink', fuchsia: 'pink', rose: 'pink', salmon: 'pink',
-      gold: 'yellow', lemon: 'yellow', mustard: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
+      gold: 'yellow', lemon: 'yellow', mustard: 'yellow', khaki: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
       charcoal: 'grey', slate: 'grey', silver: 'grey', ivory: 'white', cream: 'white', snow: 'white', ebony: 'black', jet: 'black', onyx: 'black' };
     var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) {
       return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return ALSO[a] === id && w.indexOf(a) === 0; }); });

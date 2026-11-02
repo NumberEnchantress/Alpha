@@ -89,7 +89,7 @@
     // version copied it already: nothing is copied again unasked.
     var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null, notPresets = 0, unsure = 0, waiting = [];
     if (o.list) {
-      var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false;
+      var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false, freeName = null;
       store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
       o.list.forEach(function (p) {
         if (!presetLike(p)) { notPresets++; keep.push(p); return; }
@@ -100,7 +100,8 @@
         if (ranBefore) { unsure++; waiting.push({ i: keep.length, name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
-        if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
+        if (!freeName) freeName = nameFreer();
+        if (store.set(KEY + id, Object.assign({}, p, { id: id, name: freeName(p.name) }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
         else { notMigrated++; keep.push(p); }
       });
       if (moved) writeOld(keep);
@@ -112,18 +113,23 @@
   // "Restore": entries an older version may have copied, which are not
   // stored now, are moved as new presets (with new ids, and with " (2)" added
   // to a name already in use), one (only = its place in the old list) or all.
-  function restoreOld(only) {
-    var o = oldList(); if (!o.list) return 0;
-    var used = builtInIds(), keep = [], n = 0, have = Object.create(null), taken = Object.create(null);
+  // A function that returns a name not used by any preset (built in or
+  // stored), adding " (2)" and so on, and counts it as used.
+  function nameFreer() {
+    var taken = Object.create(null);
     builtInNames().forEach(function (k) { taken[k] = 1; });
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q) && typeof q.name === 'string') taken[P.sameKey(q.name)] = 1; });
-    var free = function (name) {
+    return function (name) {
       if (typeof name !== 'string') return name;
       var out = cut(P.clean(name), P.MAX_NAME), k = 2;
       while (taken[P.sameKey(out)]) { var sfx = ' (' + k++ + ')'; out = cut(P.clean(name), P.MAX_NAME - sfx.length).trim() + sfx; }
       taken[P.sameKey(out)] = 1;
       return out;
     };
+  }
+  function restoreOld(only) {
+    var o = oldList(); if (!o.list) return 0;
+    var used = builtInIds(), keep = [], n = 0, have = Object.create(null), free = nameFreer();
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
     o.list.forEach(function (p, i) {
       if (!presetLike(p) || (only != null && i !== only)) { keep.push(p); return; }
@@ -140,6 +146,27 @@
     a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2) + '\n'], { type: 'application/json' }));
     a.download = 'old-basket-presets.json';
     document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  /* Two windows saving one name at the same moment both get through; the
+     name check then lists the later one (by key) as unreadable. Each window
+     renames only presets it saved itself, so the two never both rename.
+     Called after this window's save and on every change from another window.
+     Returns the messages to show. */
+  var mySaves = Object.create(null);
+  function renameClashes() {
+    var out = [];
+    if (memoryOnly) return out;
+    broken.forEach(function (b) {
+      var id = b.key.slice(KEY.length);
+      if (!mySaves[id] || !/already has the name/.test(b.why)) return;
+      var p = null; try { p = JSON.parse(store.raw(b.key)); } catch (e) { p = null; }
+      if (!p || typeof p.name !== 'string') return;
+      var was = p.name; p.name = uniqueName(was);
+      if (store.set(b.key, p)) out.push('Another window saved a preset named "' + was + '" at the same moment, so yours is now "' + p.name + '".');
+    });
+    if (out.length) loadMine();
+    return out;
   }
 
   // Returns false when the browser would not store it (for example, full).
@@ -297,7 +324,7 @@
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
       (broken.length ? '<div class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage:<ul class="broken-list">' +
         broken.map(function (b) {
-          return '<li>' + esc('alpha.' + b.key) + ': ' + esc(b.why) + '. <button type="button" class="btn small" data-act="broken-dl" data-key="' + esc(b.key) + '">Download as is</button> ' +
+          return '<li>' + esc('alpha.' + b.key) + ': ' + esc(String(b.why).replace(/\.$/, '')) + '. <button type="button" class="btn small" data-act="broken-dl" data-key="' + esc(b.key) + '">Download as is</button> ' +
             '<button type="button" class="btn small" data-act="broken-rm" data-key="' + esc(b.key) + '">Remove</button></li>';
         }).join('') + '</ul></div>' : '') +
       (notMigrated ? '<p class="note-bad small">' + notMigrated + ' preset(s) saved by an older version of Alpha could not be copied to the new storage because this browser\'s storage is full. ' +
@@ -421,12 +448,9 @@
       var st = dlg.querySelector('#pe-status'); st.textContent = status; announce(status, true); st.focus();
       return;
     }
-    // Another window saved a preset with the same name at the same moment: this one is renamed.
-    var clash = '';
-    if (!memoryOnly && isBroken(KEY + t.id) && /already has the name/.test(broken.filter(function (x) { return x.key === KEY + t.id; })[0].why)) {
-      var was = t.name; t.name = uniqueName(t.name);
-      if (saveOne(t)) clash = ' Another window saved a preset named "' + was + '" at the same moment, so this one is "' + t.name + '".';
-    }
+    mySaves[t.id] = 1;
+    var renamed = renameClashes(), clash = renamed.length ? ' ' + renamed.join(' ') : '';
+    if (renamed.length) { var now2 = find(Alpha.state.ds, t.id); if (now2) t.name = now2.name; }
     editing = null;
     status = memoryOnly ? 'Saved "' + t.name + '" for this visit only: this browser is not saving presets, so download it to keep it.' : 'Saved "' + t.name + '".' + clash;
     if (andUse) Alpha.settings.useScheme(t.id); else Alpha.settings.notify();
@@ -513,7 +537,9 @@
     }
     else if (act === 'delete') {
       var inUse = (Alpha.settings.scheme(ds) || {}).id === p.id;
+      var editingIt = !!editing && editing.origId === p.id && dirty();
       if (!window.confirm('Delete the preset "' + p.name + '"?' + (inUse ? ' It is the preset in use.' : '') +
+        (editingIt ? ' Your unsaved changes to it in the editor are lost too.' : '') +
         ' This cannot be undone (download it first to keep a copy).')) return;
       if (!removeOne(p.id)) { status = '"' + p.name + '" could not be deleted from this browser\'s storage.'; render('#pe-status'); return; }
       if (editing && editing.origId === p.id) editing = null;
@@ -622,8 +648,10 @@
     window.addEventListener('storage', function (e) {
       if (e.key != null && e.key.indexOf('alpha.' + KEY) !== 0) return;
       loadMine();
+      var renamed = renameClashes();
       Alpha.settings.notify();
       if (!dlg.open) return;
+      if (renamed.length) { status = renamed.join(' '); redrawKeepingFocus(); return; }
       // The list is redrawn; an open draft is kept as it is (it lives in memory).
       if (editing && editing.origId && e.key === 'alpha.' + KEY + editing.origId) {
         status = e.newValue == null ? 'The preset you are editing was deleted in another window. Saving will ask before bringing it back.'

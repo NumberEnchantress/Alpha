@@ -58,9 +58,12 @@
       status.textContent = 'Importing… (a large file can take a few seconds)';
       setTimeout(function () { run(pf, rf); }, 30); // let the status show before the work starts
     }).catch(function (e) {
-      status.textContent = e.message;
-      var old = el.querySelector('#imp-report'); if (old) old.remove();
-      lastReport = null; store.remove('importReport');
+      // A file that is not readable text gets a report of its own (it replaces the earlier one).
+      lastReport = { when: new Date().toLocaleString(), fileProblem: e.message, storedNote: 'Nothing was changed: the data in use is the same as before this import.' };
+      if (!store.set('importReport', lastReport)) store.remove('importReport');
+      Alpha.settings.open();
+      var st = document.querySelector('#imp-status'); if (st) st.textContent = e.message;
+      focusReport();
     });
   }
 
@@ -163,12 +166,14 @@
       if (/^[=+\-@\t]/.test(v)) v = "'" + v; // not a formula when opened in a spreadsheet
       return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     };
+    if (rep.fileProblem) out.push(['', 'problem', '', '', rep.fileProblem]);
     if (rep.robotNotUsed) out.push(['', 'not applied', '', '', rep.robotNotUsed]);
     if (rep.robotAgainNote) out.push(['', 'note', '', '', rep.robotAgainNote]);
     if (rep.storedNote) out.push(['', 'saved', '', '', rep.storedNote]);
     if (rep.products) {
       if (rep.products.problem) out.push([rep.productsFile, 'problem', '', '', rep.products.problem]);
-      if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + ' rows read, ' + rep.products.imported + ' imported, ' + rep.products.skipped.length + ' skipped']);
+      var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed);
+      if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + ' rows read, ' + rep.products.imported + (notApplied ? ' would be imported (not applied)' : ' imported') + ', ' + rep.products.skipped.length + ' skipped']);
       (rep.products.fileNotes || []).forEach(function (n) { out.push([rep.productsFile, 'file note', '', '', n]); });
       if (rep.productsEncoding && rep.productsEncoding.note) out.push([rep.productsFile, 'encoding', '', '', rep.productsEncoding.note]);
       (rep.products.misfits || []).forEach(function (s) { out.push([rep.productsFile, 'line to fix', s.row, '', s.why + ': ' + s.text]); });
@@ -201,7 +206,8 @@
     if (!rep) return '';
     var h = '<div class="import-report" id="imp-report" tabindex="-1"><h3>Import report <span class="muted small">(' + esc(rep.when) + ')</span></h3>' +
       (rep.robotNotUsed ? '<p class="note-bad" data-testid="not-applied">' + esc(rep.robotNotUsed) + '</p>' : '') +
-      (rep.robotAgainNote ? '<p class="note-warn small">' + esc(rep.robotAgainNote) + '</p>' : '');
+      (rep.robotAgainNote ? '<p class="note-warn small">' + esc(rep.robotAgainNote) + '</p>' : '') +
+      (rep.fileProblem ? '<p class="note-bad" data-testid="import-problem">' + esc(rep.fileProblem) + '</p>' : '');
     if (rep.products) {
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
@@ -257,7 +263,7 @@
       // Only imported data can be downloaded, so the fictional sample is never saved as store data.
       (s ? '<button type="button" class="btn" id="imp-stop">Stop using imported data</button> ' +
         '<button type="button" class="btn" id="imp-dl">Download as data file</button>' : '') + '</div>' +
-      '<p class="small muted">Columns are matched by name: NDC, drug (or description), strength, form, manufacturer, location, unit, shelf, count, NIOSH, safety cap, 20/40/60 dram, robot, preferred, rank, notes. ' +
+      '<p class="small muted">Columns are matched by name: NDC, drug (or description), strength, form, manufacturer, location, unit, shelf, pack size, NIOSH, safety cap, 20/40/60 dram, robot, preferred, rank, notes. ' +
       'The downloaded store.js goes in data/real/ and must stay private.</p>' +
       '<p id="imp-status" class="small" role="status"></p></div>' + reportHtml(lastReport);
     el.querySelector('#imp-go').addEventListener('click', function () { doImport(el); });
