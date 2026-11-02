@@ -96,7 +96,11 @@
       var again = Alpha.importcsv.applyRobotList('NDC\n' + listInUse.ndcs.map(Alpha.ndc.format).join('\n') + '\n', products, layout, { preferred: true, lineOf: lineOf });
       ['notes', 'skipped', 'notFound'].forEach(function (k) { again[k].forEach(function (x) { x.row = '-'; }); }); // no file of its own: no line numbers
       if (!again.fatal) { report.robot = again; report.robotFile = listInUse.source + ' (the robot list in use, applied again)'; robotPrior = again.prior; robotList = listInUse; }
-      else report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so it was not applied; import a robot list again if needed.';
+      else {
+        // Kept, not dropped: the next products file that has its NDCs gets it again.
+        robotList = listInUse;
+        report.robotAgainNote = 'The robot list in use (' + listInUse.source + ') has no NDC that is in these products, so no product is marked robot. The list is kept and will be applied again to the next products file; import a robot list to replace it.';
+      }
     }
     var robotOk = !rf || (report.robot && !report.robot.fatal);
     // All or nothing: if either file was refused, neither is used.

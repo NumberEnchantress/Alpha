@@ -60,7 +60,11 @@
     '\u2CA4': 'C', '\u2CA5': 'c', '\u2CA6': 'T', '\u2CA8': 'Y', '\u2CAC': 'X', '\uA4D0': 'B', '\uA4D1': 'P', '\uA4D3': 'D', '\uA4D4': 'T', '\uA4D6': 'G',
     '\uA4D7': 'K', '\uA4D9': 'J', '\uA4DA': 'C', '\uA4DC': 'Z', '\uA4DD': 'F', '\uA4DF': 'M', '\uA4E0': 'N', '\uA4E1': 'L', '\uA4E2': 'S', '\uA4E3': 'R',
     '\uA4E6': 'V', '\uA4E7': 'H', '\uA4EA': 'W', '\uA4EB': 'X', '\uA4EC': 'Y', '\uA4EE': 'A', '\uA4F0': 'E', '\uA4F2': 'I', '\uA4F3': 'O', '\uA4F4': 'U',
-    '\uA731': 's'
+    '\uA731': 's',
+    // more Cyrillic, Greek, Coptic and Latin look-alikes; Canadian syllabics
+    '\u04AE': 'Y', '\u04AF': 'y', '\u050C': 'G', '\u03F9': 'C', '\u2C99': 'm', '\u0196': 'I',
+    '\u15EA': 'D', '\u15C5': 'A', '\u1455': 'C', '\u146D': 'P', '\u14AA': 'L', '\u157C': 'H', '\u15F7': 'B', '\u144E': 'N', '\u1515': 'S',
+    '\u142F': 'V', '\u15EF': 'W', '\u15F0': 'M', '\u166D': 'X', '\u1541': 'x', '\u1587': 'R'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -68,7 +72,13 @@
   // dropped (a joiner between two emoji too), look-alike letters mapped,
   // and case ignored.
   function sameKey(s) {
-    return clean(s).normalize('NFKC').replace(IGNORABLE, '').replace(/[^\x00-\x7F]/g, function (c) { return SKELETON[c] || c; }).toLowerCase();
+    // Joiners are dropped everywhere, so a family emoji and the same faces
+    // side by side count as the same label: a refusal of two labels that
+    // look different is harmless; two that look alike passing is not.
+    // Look-alikes are mapped before and after NFKC, which turns some of
+    // them (lunate sigma, U+03F9) into letters that look different.
+    var skel = function (x) { return x.replace(/[^\x00-\x7F]/g, function (c) { return SKELETON[c] || c; }); };
+    return skel(skel(clean(s)).normalize('NFKC').replace(IGNORABLE, '')).toLowerCase();
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
@@ -77,7 +87,8 @@
   // marks, variation selectors, tag characters, blank braille) are refused.
   var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{13430}-\u{1343F}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
   // Emoji joined by zero-width joiners, with their variation selectors, are visible.
-  var EMOJI = /\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
+  // So are keycaps ("1" + U+FE0F + U+20E3) and tag-sequence flags (England, Scotland, Wales).
+  var EMOJI = /[0-9#*]\uFE0F?\u20E3|\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}|\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
   // Also refused: any format character, unassigned or private-use code point,
   // and control code other than spacing (a joiner inside an emoji is fine).
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
@@ -88,13 +99,24 @@
     if (invisible(s)) return 'contains invisible characters; type it again';
     if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
     if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
-    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u, /\p{Script=Lisu}/u].filter(function (re) { return re.test(s); });
+    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u, /\p{Script=Lisu}/u, /\p{Script=Canadian_Aboriginal}/u].filter(function (re) { return re.test(s); });
     if (scripts.length > 1) return 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters), which can look like other text; type it again';
     return null;
   }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
   function distance(a, b) { var x = rgb(a), y = rgb(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
-  function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE; }
+  // Also by eye: CIE Lab difference (dark greys such as #000000 and #2a2a2a are
+  // far apart in RGB but look the same). The closest standard pair, blue and
+  // purple, is 24 apart.
+  function lab(hex) {
+    var c = rgb(hex).map(function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    var x = (c[0] * 0.4124 + c[1] * 0.3576 + c[2] * 0.1805) / 0.95047, y = c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722, z = (c[0] * 0.0193 + c[1] * 0.1192 + c[2] * 0.9505) / 1.08883;
+    var f = function (t) { return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116; };
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+  }
+  var MIN_LAB_DISTANCE = 20;
+  function labDistance(a, b) { var x = lab(a), y = lab(b); return Math.sqrt(Math.pow(x[0] - y[0], 2) + Math.pow(x[1] - y[1], 2) + Math.pow(x[2] - y[2], 2)); }
+  function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE || labDistance(a, b) < MIN_LAB_DISTANCE; }
   // A colour called by a standard name ("Black") must look like it.
   function standard(name) {
     var n = name.toLowerCase();
