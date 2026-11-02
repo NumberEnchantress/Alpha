@@ -12,7 +12,7 @@
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
 
   var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
-  var saved = true, usable = true, unreadable = false, backupKey = null, notice = null, hooks = {}, dlg = null;
+  var extra = {}, saved = true, usable = true, unreadable = false, backupKey = null, notice = null, hooks = {}, dlg = null;
 
   // Saved settings that cannot be read (or hold values of the wrong kind) are
   // never written over unasked: a copy is kept first, under the first free
@@ -53,11 +53,17 @@
       prefs.scale = SCALES.some(function (s) { return s[0] === p.scale; }) ? p.scale : '1';
       prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
+      // Fields this version does not use (a later version's, or added by hand) are kept as they are.
+      extra = {};
+      Object.keys(p).forEach(function (k) { if (['scheme', 'scale', 'disabled', 'custom'].indexOf(k) < 0) extra[k] = p[k]; });
     }
   }
   function save() {
     if (unreadable && !backupKey) { saved = false; return; } // the unreadable original has no copy: keep it
-    saved = store.set('prefs', prefs);
+    var outPrefs = {};
+    Object.keys(extra).forEach(function (k) { outPrefs[k] = extra[k]; });
+    Object.keys(prefs).forEach(function (k) { outPrefs[k] = prefs[k]; });
+    saved = store.set('prefs', outPrefs);
     if (saved) unreadable = false;
   }
   usable = store.usable(); saved = usable; // false when the browser blocks storage
