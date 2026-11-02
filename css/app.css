@@ -116,7 +116,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Where the shelf pane scrolls (large text), its caption stays pinned to the
    pane's bottom, so the drug name moved off the drawing is never scrolled away. */
 @media (min-width: 761px) {
-  .elev > .elev-caption { position: sticky; bottom: 0; z-index: 1; background: var(--panel); max-height: 45%; overflow-y: auto; }
+  .elev > .elev-caption { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
   .elev > .elev-caption.estimated { background: var(--est); }
   .elev > .elev-caption.unknown { background: #eee; }
 }
@@ -225,6 +225,9 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .rule-form input[type=text] { font: inherit; padding: .2rem .35rem; }
 .rule-form .wide input { width: 100%; }
 .rule-form select { font: inherit; padding: .15rem; }
+/* Narrow phones: each field of a new rule keeps within the dialog. */
+.rule-form label { min-width: 0; max-width: 100%; }
+.rule-form input[type=text], .rule-form select { max-width: 100%; box-sizing: border-box; }
 .issue-list { max-height: 12rem; overflow: auto; }
 .issue-list .err { color: var(--danger-line); }
 .dialog-actions { text-align: right; }

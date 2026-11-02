@@ -116,6 +116,8 @@
     if (pf && rf && productsOk && !robotOk) report.robotNotUsed = 'Neither file was used, because ' + rf.name + ' was refused; ' + pf.name + ' was read but not applied.';
     if (changed) {
       var prevState = saved();
+      // The old report goes first, so a large one cannot take the room this import needs.
+      store.remove('importReport');
       var source = [productsSource, rf && robotOk && rf.name].filter(Boolean).join(' + ');
       var ok = keep({ products: products, source: source, when: report.when, productsAreSample: productsAreSample,
         productsSource: productsSource, lineOf: lineOf, robotPrior: robotPrior, robotList: robotList });
@@ -138,9 +140,11 @@
   function undo() {
     var u = undoInfo();
     if (!u) return;
-    if (u.prev) keep(u.prev); else { memory = null; store.remove('imported'); }
+    var kept = true;
+    if (u.prev) kept = keep(u.prev); else { memory = null; store.remove('imported'); }
     undoState = null; store.remove('importUndo');
-    lastReport = { when: new Date().toLocaleString(), storedNote: 'Undone: the data in use is back to what it was before that import (' + (u.prev ? u.prev.source + ', imported ' + u.prev.when : 'the store\'s own data, no import') + ').' };
+    lastReport = { when: new Date().toLocaleString(), undone: true, storedNote: 'Undone: the data in use is back to what it was before that import (' + (u.prev ? u.prev.source + ', imported ' + u.prev.when : 'the store\'s own data, no import') + ').' +
+      (kept ? '' : ' This browser would not save it (its storage may be full), so it lasts until the page is closed; use "Download as data file" to keep it.') };
     if (!store.set('importReport', lastReport)) store.remove('importReport');
     Alpha.settings.reload();
     Alpha.settings.open();
@@ -273,7 +277,8 @@
   // The whole report as a CSV file, for any import (long tables show their first rows only).
   var REPORT_BTN = '<p><button type="button" class="btn small" data-act="report-csv">Download the report (CSV)</button></p>';
   function undoBtn(rep) {
-    return rep.canUndo && undoInfo() ? '<p><button type="button" class="btn small" data-act="import-undo">Undo this import</button> <span class="small muted">puts back the data in use before it' + (store.raw('importUndo') == null ? ' (until the page is closed)' : '') + '</span></p>' : '';
+    // Offered while the import it would undo is the one in use (also after a refused import, which changed nothing).
+    return undoInfo() && !rep.undone ? '<p><button type="button" class="btn small" data-act="import-undo">Undo this import</button> <span class="small muted">puts back the data in use before it' + (store.raw('importUndo') == null ? ' (until the page is closed)' : '') + '</span></p>' : '';
   }
 
   function mount(el) {

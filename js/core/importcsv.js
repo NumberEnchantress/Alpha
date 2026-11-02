@@ -149,7 +149,11 @@
   // first 30 lines (then the one with more fields): a tab file whose header
   // also holds commas, or a semicolon file with "1,000" in it, reads right.
   function delimiterOf(t) {
-    var ls = t.split(/\r\n|\r|\n/).filter(function (s) { return s.trim(); }).slice(0, 30).map(function (s) { return s.replace(/"[^"]*"/g, ''); });
+    var ls = t.split(/\r\n|\r|\n/).filter(function (s) { return s.trim(); }).slice(0, 40).map(function (s) { return s.replace(/"[^"]*"/g, ''); });
+    // A title line or two above the header: count from the first line that names an NDC column.
+    var hi = -1;
+    for (var j = 0; j < Math.min(10, ls.length) && hi < 0; j++) if (/\bndc\b/i.test(ls[j])) hi = j;
+    if (hi > 0) ls = ls.slice(hi);
     var best = ',', bestScore = -1;
     [',', ';', '\t'].forEach(function (c) {
       if (!ls.length) return;
@@ -465,51 +469,35 @@
         cols.unused.push(m.unit); delete m.unit;
       }
     }
-    // A unit column none of whose values names a unit in the layout (an Rx/OTC
-    // "Section", a Fridge column of N) is about something else: not used, so
-    // shelves in single-unit locations are kept. One value that does name a
-    // unit keeps the column (each other value is then unknown, with a note).
-    if (m.unit) {
-      // a value names a unit of its own row's location (by id or label)
-      var namesUnit = function (r) {
-        var v = String(r.data[m.unit] == null ? '' : r.data[m.unit]).trim(), lc = m.location ? findLocation(String(r.data[m.location] == null ? '' : r.data[m.location]).trim(), layout) : null;
-        var units = lc ? lc.units : [].concat.apply([], layout.locations.map(function (x) { return x.units; }));
-        return units.some(function (u) { return key(v) === key(u.id) || (!!key(u.label) && key(v) === key(u.label)); });
-      };
-      var uvals = p.rows.map(function (r) { return String(r.data[m.unit] == null ? '' : r.data[m.unit]).trim(); }).filter(function (v) { return v && !PLACEHOLDER.test(v); });
-      if (uvals.length && !p.rows.some(namesUnit)) {
-        report.fileNotes.push('No value in the "' + m.unit + '" column (' + uvals.filter(function (v, i) { return uvals.indexOf(v) === i; }).slice(0, 3).map(function (v) { return '"' + v.slice(0, 15) + '"'; }).join(', ') +
-          ') names a unit of the layout, so the column was not used as the shelving unit.');
-        cols.unused.push(m.unit); delete m.unit;
-      }
-    }
+    // (Version-30 stopped using a unit column none of whose values named a unit
+    // of its row's location; that turned a conflict, such as FM-N given for
+    // 071, into a known shelf. Removed in version-31: a value that does not
+    // name a unit of its location leaves the unit, and so the shelf, unknown.)
     if (p.sepLine) report.fileNotes.push('Line 1 ("sep=") tells Excel the delimiter; it was skipped.');
     if (p.titleLines && p.titleLines.length) report.fileNotes.push('Line' + (p.titleLines.length > 1 ? 's ' : ' ') + p.titleLines.join(', ') + ' above the header (a title) ' + (p.titleLines.length > 1 ? 'were' : 'was') + ' skipped.');
-    // A first column with no name holding 0, 1, 2 ... (or 1, 2, 3 ...) is the
-    // row numbers some programs write (pandas): ignored.
+    // A total line is skipped and listed, whatever its field count, but only
+    // in its exact form: its first value is "Total", "Subtotal", "Grand total"
+    // or "Total items" (with ":" and a number at most), and every other value
+    // is a number. "Total 2 bottles max" is not one (it can be the tail of a
+    // row split by a line break, whose cut value would then import).
+    // (Version-30 also dropped a comma at the end of every row; with an
+    // unquoted comma inside a value on every row that shifted a whole file.
+    // Removed in version-31: such files are refused, with what to fix.)
+    var TOTAL = /^(grand\s+|sub-?)?totals?(\s+(items?|products?|rows?|lines?|count|qty|quantity))?\s*[:=]?\s*[\d.,]*$/i, totalSet = {};
+    p.rows.forEach(function (r) {
+      var vals = r.cells.map(function (c) { return String(c == null ? '' : c).trim(); }).filter(Boolean);
+      if (vals.length && TOTAL.test(vals[0]) && vals.slice(1).every(function (v) { return /^[\d.,$]+$/.test(v); })) totalSet[r.line] = 1;
+    });
+    // A first column with no name holding 0, 1, 2 ... (or 1, 2, 3 ...) on every
+    // row (total lines aside) is the row numbers some programs write (pandas): ignored.
     if (p.fields.length > 1 && !p.fields[0] && p.rows.length) {
-      var base = String(p.rows[0].cells[0]).trim() === '1' ? 1 : 0;
-      if (p.rows.every(function (r, ri) { return String(r.cells[0]).trim() === String(ri + base); })) {
+      var numbered = p.rows.filter(function (r) { return !totalSet[r.line]; });
+      var base = numbered.length && String(numbered[0].cells[0]).trim() === '1' ? 1 : 0;
+      if (numbered.length && numbered.every(function (r, ri) { return String(r.cells[0]).trim() === String(ri + base); })) {
         p.fields[0] = '(row numbers)';
         report.fileNotes.push('The first column has no name and holds row numbers (' + base + ', ' + (base + 1) + ', ...); it was not used.');
       }
     }
-    // A comma at the end of every row but not of the header, with that last
-    // field empty everywhere, is a trailing delimiter: dropped. (Values shifted
-    // by a missing and an extra field are the known limit, as without it.)
-    // At least 3 rows, so it is the file's own shape and not one row's fault.
-    if (p.rows.length >= 3 && p.rows.every(function (r) { return r.count === p.fields.length + 1 && blankCell(r.cells[r.cells.length - 1]); })) {
-      p.rows.forEach(function (r) { r.cells = r.cells.slice(0, -1); r.count--; });
-      report.fileNotes.push('Every row ends with an extra empty field (a comma at the end of each line); it was ignored.');
-    }
-    // A total line ("Total", "Subtotal", "Grand total" first, no NDC, no drug
-    // name) is not a product: skipped and listed, whatever its field count.
-    var TOTAL = /^(grand\s+|sub-?)?totals?\b/i, totalSet = {};
-    p.rows.forEach(function (r) {
-      var firstCell = r.cells.map(function (c) { return String(c == null ? '' : c).trim(); }).filter(Boolean)[0] || '';
-      var hasNdc = r.cells.some(function (c) { return !!ndc.normalize(excelText(String(c).trim())); });
-      if (TOTAL.test(firstCell) && !hasNdc && !(r.count === p.fields.length && String(r.data[m.drug] == null ? '' : r.data[m.drug]).trim() && !TOTAL.test(String(r.data[m.drug]).trim()))) totalSet[r.line] = 1;
-    });
 
     // Values are matched to columns by position, so every row must have
     // exactly the header's number of fields, and cells under blank header
@@ -796,7 +784,9 @@
     // A first line is a header when it has words and no NDC ("Robot inventory
     // 10/27/2026", "Drug,Item"); a first line of numbers only is data, so a bad
     // NDC there refuses the list like any other bad line.
-    var looksLikeData = !first.some(function (c) { c = String(c).trim(); return /\p{L}/u.test(c) && !SCI.test(c); }) || first.some(function (c) { return !!ndc.normalize(excelText(String(c).trim())); });
+    // (an NDC in any form, "NDC 9999..." too, a number in scientific notation, or a run of 8 or more digits: data)
+    var looksLikeData = !first.some(function (c) { c = String(c).trim(); return /\p{L}/u.test(c) && !SCI.test(c); }) ||
+      first.some(function (c) { c = String(c).trim(); return !!ndcIn(c) || SCI.test(c) || /\d{8}/.test(c.replace(/[-\s]/g, '')); });
     if (at >= 0) { col = at; start = 1; }
     else {
       if (!looksLikeData) {
@@ -851,6 +841,8 @@
       var nt = ndcText(raw);
       if (nt.how) { report.notes.push({ row: line, ndc: raw, note: 'read as ' + nt.value + ' (' + nt.how + ')' }); raw = nt.value; }
       var n = ndc.normalize(raw);
+      // An empty NDC with something beside it (a robot cell with no product) is an empty slot: noted, not unreadable.
+      if (!raw && rows[i].cells.some(function (c) { return String(c).trim(); })) { report.notes.push({ row: line, ndc: '', note: 'no NDC on this line (an empty slot?); nothing to mark' }); continue; }
       if (!n) { report.skipped.push({ row: line, ndc: raw, reason: whyBadNdc(raw) }); continue; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: raw, reason: 'duplicate of line ' + seen[n] }); continue; }
       seen[n] = line;

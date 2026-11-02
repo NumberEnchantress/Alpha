@@ -28,9 +28,14 @@
     return (ds.basketSchemes || []).map(function (p) { return P.sameKey(p.name); });
   }
 
+  // Stored presets are compared by plain letters (case aside): look-alike
+  // names are refused when a preset is saved, but one already stored stays
+  // usable when the look-alike rules grow stricter in a later version.
+  function plainKey(x) { return P.clean(x).toLowerCase(); }
   function loadMine() {
     var ok = [], bad = [], names = Object.create(null), builtins = builtInIds();
-    builtInNames().forEach(function (n) { names[n] = 1; });
+    var ds0 = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample)) || {};
+    (ds0.basketSchemes || []).forEach(function (p) { names[plainKey(p.name)] = 1; });
     if (memoryOnly) return; // storage is blocked: keep what is in memory
     migrateOldList();
     store.keys(KEY).forEach(function (k) {
@@ -39,9 +44,9 @@
       if (!p || typeof p !== 'object' || Array.isArray(p)) why = 'it is not readable preset data';
       else if (!ID_RE.test(id) || p.id !== id) why = 'its id does not match its storage key';
       else if (builtins[id]) why = 'it has the id of a built-in preset';
-      else if (P.check(p).length) why = P.check(p)[0];
-      else if (names[P.sameKey(p.name)]) why = 'another preset (built in or yours) already has the name "' + P.clean(p.name) + '"';
-      if (!why) { names[P.sameKey(p.name)] = 1; ok.push(p); } else bad.push({ key: k, why: why });
+      else if (P.check(p, { stored: true }).length) why = P.check(p, { stored: true })[0];
+      else if (names[plainKey(p.name)]) why = 'another preset (built in or yours) already has the name "' + P.clean(p.name) + '"';
+      if (!why) { names[plainKey(p.name)] = 1; ok.push(p); } else bad.push({ key: k, why: why });
     });
     mine = ok; broken = bad;
   }
@@ -104,7 +109,7 @@
         var firstOfId = typeof p.id === 'string' && ID_RE.test(p.id) && !seenIds[p.id];
         var goodId = firstOfId && !used[p.id];
         if (typeof p.id === 'string') seenIds[p.id] = 1;
-        if (have[contentKey(p)]) { moved = true; return; } // an exact copy is stored: already moved
+        if (have[contentKey(p)] || restoredKeys().indexOf(entryKey(p)) >= 0) { moved = true; return; } // an exact copy is stored, or it was restored (perhaps renamed): already moved
         if (ranBefore && waitRoom.indexOf(contentKey(p)) < 0) { unsure++; waiting.push({ k: entryKey(p), name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
@@ -150,12 +155,15 @@
     for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
     return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + s.length.toString(36);
   }
+  // Entries already restored (by contents key), so an older tab writing its list
+  // again does not offer one again after its name got " (2)".
+  function restoredKeys() { try { var r = JSON.parse(store.raw('presets-restored') || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
   // Returns the names restored. only: an entry's key (one entry), or null (all).
   var gone = false;
   function restoreOld(only) {
     gone = false;
     var o = oldList(); if (!o.list) { gone = only != null; return []; }
-    var used = builtInIds(), keep = [], names = [], found = false, have = Object.create(null), free = nameFreer();
+    var used = builtInIds(), keep = [], names = [], found = false, restoredNow = [], have = Object.create(null), free = nameFreer();
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
     o.list.forEach(function (p) {
       if (!presetLike(p) || (only != null && (found || entryKey(p) !== only))) { keep.push(p); return; }
@@ -163,9 +171,10 @@
       if (have[contentKey(p)]) return; // stored already
       have[contentKey(p)] = 1;
       var id = freeId(p.name, used), name = free(p.name);
-      if (store.set(KEY + id, Object.assign({}, p, { id: id, name: name }))) { used[id] = 1; names.push(typeof name === 'string' ? name : '(no name)'); } else keep.push(p);
+      if (store.set(KEY + id, Object.assign({}, p, { id: id, name: name }))) { used[id] = 1; names.push(typeof name === 'string' ? name : '(no name)'); restoredNow.push(entryKey(p)); } else keep.push(p);
     });
     gone = only != null && !found;
+    if (restoredNow.length) store.setRaw('presets-restored', JSON.stringify(restoredKeys().concat(restoredNow).slice(-500)));
     writeOld(keep);
     return names;
   }
@@ -181,7 +190,7 @@
      renames only presets it saved itself, so the two never both rename.
      Called after this window's save and on every change from another window.
      Returns the messages to show. */
-  var mySaves = Object.create(null), lastArrowAt = 0, justSaved = Object.create(null);
+  var mySaves = Object.create(null), lastArrowAt = 0, justSaved = Object.create(null), ownStatusAt = 0;
   function renameClashes() {
     var out = [];
     if (memoryOnly) return out;
@@ -356,6 +365,7 @@
     else if (l.textContent !== text) l.textContent = text;
   }
   function render(focusSel) {
+    if (focusSel === '#pe-status') ownStatusAt = Date.now();
     var ds = Alpha.state.ds;
     body().innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
@@ -387,6 +397,8 @@
     if (editing) showErrors();
     var f = focusSel && dlg.querySelector(focusSel);
     if (f) f.focus();
+    // In the name box the caret goes to the end, so typing adds to the name.
+    if (f && f.id === 'pe-name' && f.setSelectionRange) f.setSelectionRange(f.value.length, f.value.length);
     announce(status);
   }
 
@@ -586,17 +598,28 @@
     }
     else if (act === 'delete') {
       var inUse = (Alpha.settings.scheme(ds) || {}).id === p.id;
-      var editingIt = !!editing && editing.origId === p.id && dirty();
+      var editingIt = !!editing && editing.origId === p.id && dirty(), asked = memoryOnly ? null : store.raw(KEY + p.id);
       if (!window.confirm('Delete the preset "' + p.name + '"?' + (inUse ? ' It is the preset in use.' : '') +
         (editingIt ? ' Your unsaved changes to it in the editor are lost too.' : '') +
         ' This cannot be undone (download it first to keep a copy).')) return;
-      if (!removeOne(p.id)) { status = '"' + p.name + '" could not be deleted from this browser\'s storage.'; render('#pe-status'); return; }
-      if (editing && editing.origId === p.id) editing = null;
-      status = 'Deleted "' + p.name + '".';
-      var fallback = builtIn(ds)[0] || mine[0];
-      if (inUse && fallback) { Alpha.settings.useScheme(fallback.id); status += ' Now using "' + fallback.name + '".'; }
-      else Alpha.settings.notify();
-      render('#pe-status');
+      // Changed in another window while the question was open: what was asked
+      // about is not what would go. Checked a moment later, once changes made
+      // by other windows while the question blocked this one have arrived.
+      setTimeout(function () {
+        if (!memoryOnly && store.raw(KEY + p.id) !== asked) {
+          loadMine();
+          status = '"' + p.name + '" was not deleted: another window changed it while you were deciding. The list is up to date; delete it again if you still want to.';
+          render('#pe-status'); announce(status, true);
+          return;
+        }
+        if (!removeOne(p.id)) { status = '"' + p.name + '" could not be deleted from this browser\'s storage.'; render('#pe-status'); return; }
+        if (editing && editing.origId === p.id) editing = null;
+        status = 'Deleted "' + p.name + '".';
+        var fallback = builtIn(ds)[0] || mine[0];
+        if (inUse && fallback) { Alpha.settings.useScheme(fallback.id); status += ' Now using "' + fallback.name + '".'; }
+        else Alpha.settings.notify();
+        render('#pe-status');
+      }, 150);
     }
     else if (act === 'new') { if (okToDiscard()) startEdit(blankPreset(), null); }
     else if (act === 'add-group') {
@@ -709,7 +732,10 @@
       // moment ago (both clicked Save at once): its version replaced ours. Ours
       // is put back in the editor, so it is not lost unseen.
       var jid = e.key && e.key.indexOf('alpha.' + KEY) === 0 ? e.key.slice(('alpha.' + KEY).length) : null, js = jid && justSaved[jid];
-      if (js && Date.now() - js.at < 5000 && e.newValue != null && e.newValue !== js.raw && !editing) {
+      // (what is stored now decides it, not the event: the window whose edit is
+      // stored has nothing to be told; and only for saves within 1.5 s)
+      var nowRaw = jid ? store.raw(KEY + jid) : null;
+      if (js && Date.now() - js.at < 1500 && nowRaw != null && nowRaw !== js.raw && !editing) {
         delete justSaved[jid];
         startEdit(js.preset, jid);
         editing.base = js.raw; // so Save asks before replacing the other window's version
@@ -721,7 +747,7 @@
       if (editing && editing.origId && e.key === 'alpha.' + KEY + editing.origId) {
         status = e.newValue == null ? 'The preset you are editing was deleted in another window. Saving will ask before bringing it back.'
           : 'The preset you are editing was changed in another window. Saving will ask before replacing that version.';
-      } else status = 'Presets were changed in another window; the list is up to date.';
+      } else if (Date.now() - ownStatusAt > 2000) status = 'Presets were changed in another window; the list is up to date.'; // (a message from this window's own action, just shown, stays)
       redrawKeepingFocus();
     });
   }
