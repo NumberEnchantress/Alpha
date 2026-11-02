@@ -19,8 +19,8 @@
   // "Product", which is often a product code). A "Product NDC" (labeler and
   // product only, no package) is not an NDC column.
   var COLUMNS = {
-    ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'ndc11code', 'packagendc', 'ndcpackagecode', 'itemndc', 'nationaldrugcode'],
-    drug: ['drug', 'drugname', 'genericname', 'productname', 'itemname', 'itemdescription', 'drugdescription', 'productdescription', 'name', 'generic', 'description', 'product'],
+    ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'ndc11code', 'packagendc', 'ndcpackagecode', 'itemndc', 'nationaldrugcode', 'ndcupc'],
+    drug: ['drug', 'drugname', 'genericname', 'productname', 'itemname', 'itemdescription', 'drugdescription', 'productdescription', 'description', 'name', 'product'],
     strength: ['strength', 'str'],
     form: ['form', 'dosageform'],
     manufacturer: ['manufacturer', 'mfr', 'mfg', 'labeler', 'maker'],
@@ -61,7 +61,9 @@
     var m = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/.exec(r.text);
     if (m) {
       var line = r.text.slice(0, m.index).split(/\r\n|\r|\n/).length, code = m[0].charCodeAt(0);
-      return { problem: 'Line ' + line + ' holds an invisible control character (code ' + code + (code >= 128 ? ', a byte with no meaning in ' + r.encoding : '') + '), as some barcode scanners add. Remove it and import again.' };
+      return { problem: 'Line ' + line + (code >= 128 && r.encoding === 'Windows-1252'
+        ? ' holds a byte with no meaning in Windows-1252 (code ' + code + '), so the file may be in another encoding or damaged. Save it as "CSV UTF-8" and import again.'
+        : ' holds an invisible control character (code ' + code + ')' + (code < 32 ? ', as some barcode scanners add' : '') + '. Remove it and import again.') };
     }
     return r;
   }
@@ -309,7 +311,8 @@
     if (!s) return 'no NDC';
     if (SCI.test(s)) return 'NDC "' + s + '" was turned into a number by a spreadsheet (scientific notation); format the column as text and export again';
     if (!d.length) return 'NDC "' + s + '" has no digits';
-    if (d.length === 10) return 'NDC "' + s + '" has 10 digits and no hyphens, so the 5-4-2 form cannot be known';
+    if (/\p{L}/u.test(s)) return '"' + s.slice(0, 40) + '" is not an NDC';
+    if (d.length === 10) return 'NDC "' + s + '" has 10 digits and no hyphens, so the 5-4-2 form cannot be known (a leading zero lost in a spreadsheet, or a 10-digit NDC written without hyphens)';
     if (d.length < 10) return 'NDC "' + s + '" has only ' + d.length + ' digits (leading zeros lost in a spreadsheet?)';
     return 'NDC "' + s + '" is not a valid NDC form';
   }
@@ -397,6 +400,13 @@
         (at ? ' The header seems to be on line ' + at + ': remove the line' + (at - p.headLine > 1 ? 's' : '') + ' above it (a title, for example) and import again.' : ''));
     }
     if (!m.drug) return stop('No drug name column found (expected a header such as "Drug", "Description" or "Item description"), so ' + none);
+    // A drug column of yes/no or number values is a flag or a code column under a drug-like name.
+    var dv = p.rows.map(function (r) { return String(r.data[m.drug] == null ? '' : r.data[m.drug]).trim(); }).filter(Boolean);
+    var flagLike = dv.filter(function (v) { return /^(yes|no|y|n|true|false|x|[\d.,\-\/]+)$/i.test(v); }).length;
+    if (dv.length >= 3 && flagLike > dv.length * 0.8) {
+      return stop('The column used as the drug name, "' + m.drug + '", holds yes/no values or numbers (' + dv.slice(0, 3).map(function (v) { return '"' + v.slice(0, 20) + '"'; }).join(', ') + '), not drug names, so ' + none +
+        ' Rename the column that holds the drug names to "Drug" (or rename this one), and import again.');
+    }
 
     // A "Unit" column holding units of measure (EA, BX, ...) is not about shelving units.
     if (m.unit) {
@@ -444,7 +454,33 @@
     var misfits = p.rows.filter(function (r) {
       return r.count !== width || !p.fields.every(function (f, i) { return f || blankCell(r.cells[i]); });
     });
-    if (misfits.length) {
+    // Text in the NDC column that is not an NDC (and not a placeholder such
+    // as "N/A") is what a split or shifted row leaves there, so it refuses the
+    // file too, and so does a row with values but no NDC and no drug name. An
+    // NDC column name there is a second header: the same columns are skipped
+    // as a repeat, another order refuses the file. Checked on the rows that
+    // have the right shape, so one refusal lists every line to fix.
+    var headKeys = p.fields.map(key).join(',');
+    function repeatHeader(r) {
+      return !ndc.normalize(String(r.data[m.ndc] == null ? '' : r.data[m.ndc])) && r.cells.some(function (c) { return COLUMNS.ndc.indexOf(key(c)) >= 0; });
+    }
+    var misfitSet = {}; misfits.forEach(function (r) { misfitSet[r.line] = 1; });
+    var odd = [];
+    for (var hi = 0; hi < p.rows.length; hi++) {
+      var hr = p.rows[hi];
+      if (misfitSet[hr.line]) continue;
+      var hv = ndcText(String(hr.data[m.ndc] == null ? '' : hr.data[m.ndc]).trim()).value;
+      if (repeatHeader(hr)) {
+        if (hr.cells.map(key).join(',') !== headKeys) {
+          return stop('Line ' + hr.line + ' looks like a second header with the columns in another order (two files pasted together?), so the rows after it cannot be matched to columns. Nothing was imported; import the parts as separate files.');
+        }
+      } else if (!hv && !String(m.drug && hr.data[m.drug] || '').trim()) {
+        odd.push({ r: hr, why: 'values but no NDC and no drug name' });
+      } else if (/\p{L}/u.test(hv) && !ndc.normalize(hv) && !SCI.test(hv) && !PLACEHOLDER.test(hv)) {
+        odd.push({ r: hr, why: 'the NDC column holds "' + hv.slice(0, 40) + '", which is not an NDC' });
+      }
+    }
+    if (misfits.length || odd.length) {
       // Every such line is listed in report.misfits (shown as a table, and in the report CSV).
       var wrongCount = misfits.filter(function (r) { return r.count !== width; }), unnamed = misfits.filter(function (r) { return r.count === width; });
       var blankCols = p.fields.map(function (f, i) { return f ? null : 'column ' + (i + 1); }).filter(Boolean);
@@ -453,7 +489,8 @@
         return { row: r.line, text: lineText(r),
           why: r.count !== width ? r.count + ' field' + (r.count > 1 ? 's' : '') + '; the header has ' + width
             : 'a value under ' + blankCols.join(' or ') + ', which has no name in the header' };
-      });
+      }).concat(odd.map(function (o) { return { row: o.r.line, why: o.why, text: lineText(o.r) }; }))
+        .sort(function (x, y) { return x.row - y.row; });
       var msg = 'Nothing was imported, so the data in use stays as it is. ';
       if (wrongCount.length) {
         msg += (wrongCount.length === 1 ? 'Line ' : 'Lines ') + listLines(wrongCount) + ' do' + (wrongCount.length === 1 ? 'es' : '') + ' not have the header\'s ' + width + ' fields. ' +
@@ -465,36 +502,12 @@
         msg += (unnamed.length === 1 ? 'Line ' : 'Lines ') + listLines(unnamed) + ' ha' + (unnamed.length === 1 ? 's' : 've') + ' a value under ' + blankCols.join(' or ') + ', which has no name in the header, so it cannot be known what it is (it may also be a value shifted by an unquoted comma). ' +
           'Give that column a name in the header, or delete it. ';
       }
-      return stop(msg + 'Then import again.');
-    }
-    // Text in the NDC column that is not an NDC (and not a placeholder such
-    // as "N/A") is what a split or shifted row leaves there, so it refuses the
-    // file too. An NDC column name there is a second header: the same columns
-    // are skipped as a repeat, another order refuses the file.
-    var headKeys = p.fields.map(key).join(',');
-    function repeatHeader(r) {
-      return !ndc.normalize(String(r.data[m.ndc] == null ? '' : r.data[m.ndc])) && r.cells.some(function (c) { return COLUMNS.ndc.indexOf(key(c)) >= 0; });
-    }
-    var odd = []; // every line with text that is not an NDC, or values but no NDC and no drug name
-    for (var hi = 0; hi < p.rows.length; hi++) {
-      var hr = p.rows[hi], hv = ndcText(String(hr.data[m.ndc] == null ? '' : hr.data[m.ndc]).trim()).value;
-      if (repeatHeader(hr)) {
-        if (hr.cells.map(key).join(',') !== headKeys) {
-          return stop('Line ' + hr.line + ' looks like a second header with the columns in another order (two files pasted together?), so the rows after it cannot be matched to columns. Nothing was imported; import the parts as separate files.');
-        }
-      } else if (!hv && !String(m.drug && hr.data[m.drug] || '').trim()) {
-        // Values but no NDC and no drug name: the tail of a split row, or a total or note line.
-        odd.push({ r: hr, why: 'values but no NDC and no drug name' });
-      } else if (/\p{L}/u.test(hv) && !ndc.normalize(hv) && !SCI.test(hv) && !PLACEHOLDER.test(hv)) {
-        odd.push({ r: hr, why: 'the NDC column holds "' + hv.slice(0, 40) + '", which is not an NDC' });
+      if (odd.length) {
+        msg += (odd.length === 1 ? 'Line ' : 'Lines ') + listLines(odd.map(function (o) { return o.r; })) +
+          (odd.length === 1 ? ' has' : ' have') + ' text that is not an NDC in the NDC column, or values but no NDC and no drug name. That is a total, subtotal or note line, or a row split by a line break inside a value or shifted by a comma, so the values cannot be matched to columns safely. ' +
+          'Delete total and note lines, or fix the rows; if a product has no NDC, leave its cell empty or write N/A. ';
       }
-    }
-    if (odd.length) {
-      report.rows = 0;
-      report.misfits = odd.map(function (o) { return { row: o.r.line, why: o.why, text: lineText(o.r) }; });
-      return stop('Nothing was imported, so the data in use stays as it is. ' + (odd.length === 1 ? 'Line ' : 'Lines ') + listLines(odd.map(function (o) { return o.r; })) +
-        (odd.length === 1 ? ' has' : ' have') + ' text that is not an NDC in the NDC column, or values but no NDC and no drug name. That is a total, subtotal or note line, or a row split by a line break inside a value or shifted by a comma, so the values cannot be matched to columns safely. ' +
-        'Delete total and note lines, or fix the rows, and import again; if a product has no NDC, leave its cell empty or write N/A.');
+      return stop(msg + 'Then import again.');
     }
     // A value that starts with a space, in a column whose values do not, is
     // what an unquoted ", " inside text leaves behind ("AMOXICILLIN, CLAV..."
@@ -515,7 +528,13 @@
 
     p.rows.forEach(function (row) {
       var r = row.data, line = row.line;
-      var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
+      // Excel's ="..." (a value kept as text) is the text inside, in any column
+      // (the NDC column notes it, below).
+      var get = function (c) {
+        var v = m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : '';
+        var x = c !== 'ndc' && /^="(.*)"$/.exec(v);
+        return x ? x[1].trim() : v;
+      };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
       if (repeatHeader(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
@@ -549,15 +568,19 @@
           prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
           var rest = sm[3].trim(), restUsed = !form && !!rest;
           // "TAB 1000 CT": the pack count is not part of the form.
-          var ct = /^(.*?)\s*\b(\d+)\s*(ct|cnt|count|ea)\.?$/i.exec(rest);
+          var ct = /^(.*?)\s*\b(\d+)\s*(ct|cnt|count|ea|tablets|tabs|capsules|caps)\.?$/i.exec(rest);
           if (restUsed && ct) {
             rest = ct[1].trim(); restUsed = !!rest;
             if (!get('countPerBottle')) { prod.countPerBottle = Number(ct[2]); note('"' + ct[2] + ' ' + ct[3] + '" in the description read as a count of ' + ct[2]); }
           }
-          if (restUsed) form = rest;
+          // A form is words ("TAB", "ER CAPSULE"); a bare number or a word plus a
+          // number is not known to be one, so it is left out, with a note.
+          var formOk = /^[\p{L}][\p{L}\s.\/-]*$/u.test(rest);
+          if (restUsed && formOk) form = rest;
           report.split++;
-          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed ? ', form "' + form + '"' : '') +
-            (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : ''));
+          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed && formOk ? ', form "' + form + '"' : '') +
+            (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : '') +
+            (rest && restUsed && !formOk ? '; "' + rest + '" not kept (not known to be the form)' : ''));
         }
       }
       if (strength) prod.strength = strength;
@@ -583,16 +606,14 @@
       // A placeholder such as "-", "?" or "n/a" means no unit was given.
       if (rawUnit && (!key(rawUnit) || PLACEHOLDER.test(rawUnit))) { note('unit "' + rawUnit + '" read as not given'); rawUnit = ''; }
       // Names match only when both have letters or digits (a unit may have no label).
-      // A unit is named by its id or label, by the rest of its id after the
-      // location code ("N" for FM-N at FM), or by its number ("1" for "Fridge 1"
-      // or REF-1). Only one unit may match; two or more leave it unknown.
+      // A unit is named by its id or its label, exactly (letter case, spaces
+      // and punctuation aside). Nothing shorter: "1" or "N" can be a flag or a
+      // pack unit as easily as a fridge or face (version-27 matched those and
+      // invented units). Two matches leave it unknown.
       var sameUnit = function (u) {
-        var r = key(rawUnit), id = key(u.id), lc = loc ? key(loc.code) : '';
+        var r = key(rawUnit), id = key(u.id);
         if (!r) return false;
-        if (r === id || (!!key(u.label) && r === key(u.label))) return true;
-        if (lc && id.indexOf(lc) === 0 && id.length > lc.length && r === id.slice(lc.length)) return true;
-        var num = function (x) { var mm = /(\d+)$/.exec(key(x)); return mm ? Number(mm[1]) : null; };
-        return /^\d+$/.test(r) && (num(u.id) === Number(r) || num(u.label) === Number(r));
+        return r === id || (!!key(u.label) && r === key(u.label));
       };
       if (unitInLoc && (!rawUnit || sameUnit(unitInLoc))) { unit = unitInLoc; prod.unit = unit.id; }
       else if (unitInLoc) { note('unit "' + rawUnit + '" does not match the unit ' + unitInLoc.id + ' given as the location; unit left unknown'); unitWhy = 'the unit columns disagree'; }
@@ -672,9 +693,10 @@
       report.fatal = true; return report;
     }
     first.map(key).forEach(function (h, i) { if (at < 0 && COLUMNS.ndc.indexOf(h) >= 0) at = i; });
-    // A first line with any digit is data (a bad NDC there refuses the list
-    // like any other bad line); only a line of words, or an NDC column name, is a header.
-    var looksLikeData = first.some(function (c) { return /\d/.test(String(c)); });
+    // A first line is a header when it has words and no NDC ("Robot inventory
+    // 10/27/2026", "Drug,Item"); a first line of numbers only is data, so a bad
+    // NDC there refuses the list like any other bad line.
+    var looksLikeData = !first.some(function (c) { c = String(c).trim(); return /\p{L}/u.test(c) && !SCI.test(c); }) || first.some(function (c) { return !!ndc.normalize(excelText(String(c).trim())); });
     if (at >= 0) { col = at; start = 1; }
     else if (!looksLikeData) {
       start = 1;
@@ -682,6 +704,20 @@
     }
     report.rows = rows.length - start;
     if (!report.rows) { report.problem = 'The robot list has a header line but no NDCs.'; report.fatal = true; return report; }
+
+    // NDCs in more than one column ("NDC,Alt NDC", or two NDCs on a line): only
+    // one column would be read and the others dropped unseen, so the list is refused.
+    var twoCols = [];
+    for (var ti = start; ti < rows.length && twoCols.length < 50; ti++) {
+      if (rows[ti].cells.length !== rows[0].cells.length) continue; // refused as unreadable below
+      var nd = rows[ti].cells.filter(function (c, ci) { return ci !== col && !!ndc.normalize(excelText(String(c).trim())); });
+      if (nd.length) twoCols.push(rows[ti].line);
+    }
+    if (twoCols.length) {
+      report.problem = 'Nothing was used from this list: line' + (twoCols.length > 1 ? 's ' : ' ') + twoCols.slice(0, 8).join(', ') + (twoCols.length > 8 ? ' and more' : '') +
+        ' ha' + (twoCols.length > 1 ? 've' : 's') + ' NDCs in more than one column, and only one column is read, so NDCs would be left out of the robot. Put all the robot NDCs in one column (one per line) and import again.';
+      report.fatal = true; return report;
+    }
 
     var byNdc = {};
     products.forEach(function (p) { byNdc[p.ndc] = p; });

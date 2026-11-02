@@ -23,7 +23,7 @@
     var plain = function (o) { return !!o && typeof o === 'object' && !Array.isArray(o); };
     return ('scheme' in p && p.scheme !== null && typeof p.scheme !== 'string') ||
       ('scale' in p && !SCALES.some(function (x) { return x[0] === p.scale; })) ||
-      ('disabled' in p && !plain(p.disabled)) ||
+      ('disabled' in p && (!plain(p.disabled) || Object.keys(p.disabled).some(function (k) { return typeof p.disabled[k] !== 'boolean'; }))) ||
       // each custom rule must be a rule: an object with a text id, a message and a condition
       ('custom' in p && (!Array.isArray(p.custom) || !p.custom.every(function (r) {
         // the same checks as rules in the data file

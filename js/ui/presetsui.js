@@ -87,7 +87,15 @@
     // Versions 17-21 wrote "presets-migrated", versions 22-23 "presets-migrated-2"
     // after copying the list (and left it in place). Either means an older
     // version copied it already: nothing is copied again unasked.
-    var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null, notPresets = 0, unsure = 0, waiting = [];
+    // Also counted as "ran before" (version-28): this version's own marker,
+    // set after it moves a list, and any preset already stored one per entry.
+    // An old list seen then was written again by an older version still open
+    // in another tab (its stale copy), so a preset deleted here would come back.
+    var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null ||
+      store.raw('presets-moved') != null || store.keys(KEY).length > 0, notPresets = 0, unsure = 0, waiting = [], stillWaiting = [];
+    var waitRoom = []; // entries this version could not copy for lack of room (by contents)
+    try { waitRoom = JSON.parse(store.raw('presets-waiting') || '[]'); } catch (e) { waitRoom = []; }
+    if (!Array.isArray(waitRoom)) waitRoom = [];
     if (o.list) {
       var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false, freeName = null;
       store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
@@ -97,14 +105,20 @@
         var goodId = firstOfId && !used[p.id];
         if (typeof p.id === 'string') seenIds[p.id] = 1;
         if (have[contentKey(p)]) { moved = true; return; } // an exact copy is stored: already moved
-        if (ranBefore) { unsure++; waiting.push({ i: keep.length, name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
+        if (ranBefore && waitRoom.indexOf(contentKey(p)) < 0) { unsure++; waiting.push({ i: keep.length, name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
         if (!freeName) freeName = nameFreer();
         if (store.set(KEY + id, Object.assign({}, p, { id: id, name: freeName(p.name) }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
-        else { notMigrated++; keep.push(p); }
+        else { notMigrated++; keep.push(p); stillWaiting.push(contentKey(p)); }
       });
       if (moved) writeOld(keep);
+      // This version moved (part of) the list: say so, and remember the
+      // entries still waiting for room, the only ones tried again unasked.
+      if (!ranBefore || waitRoom.length) {
+        store.setRaw('presets-moved', '1');
+        if (stillWaiting.length) store.setRaw('presets-waiting', JSON.stringify(stillWaiting)); else store.remove('presets-waiting');
+      }
     }
     if ((o.raw != null && !o.list) || notPresets || unsure || backup != null) {
       oldLeft = { unreadableList: o.raw != null && !o.list, notPresets: notPresets, unsure: unsure, waiting: waiting, backup: backup != null };
@@ -153,7 +167,7 @@
      renames only presets it saved itself, so the two never both rename.
      Called after this window's save and on every change from another window.
      Returns the messages to show. */
-  var mySaves = Object.create(null);
+  var mySaves = Object.create(null), lastArrowAt = 0;
   function renameClashes() {
     var out = [];
     if (memoryOnly) return out;
@@ -332,7 +346,7 @@
       (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha needs a look: ' +
         [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + (oldLeft.notPresets === 1 ? ' entry is not a preset' : ' entries are not presets') : '',
           oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : '',
-          oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now as ' + (oldLeft.unsure === 1 ? 'it was' : 'they were') + ': deleted or changed since, or that version did not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') + '. Restore adds ' + (oldLeft.unsure === 1 ? 'it' : 'them') + ' as new presets' : ''].filter(Boolean).join('; ') +
+          oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now as ' + (oldLeft.unsure === 1 ? 'it was' : 'they were') + ': deleted or changed since, or that version did not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') + '. Restore adds ' + (oldLeft.unsure === 1 ? 'it as a new preset' : 'them as new presets') : ''].filter(Boolean).join('; ') +
         '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
         (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore ' + (oldLeft.unsure === 1 ? 'it' : 'all ' + oldLeft.unsure) + '</button>' : '') +
         (oldLeft.waiting && oldLeft.waiting.length ? '<ul class="old-waiting">' + oldLeft.waiting.map(function (w) {
@@ -515,7 +529,7 @@
       if (notMigrated) return; // presets still waiting to be copied would be lost
       var lost = oldLeft ? [oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' not in your list now' : '', oldLeft.notPresets ? oldLeft.notPresets + (oldLeft.notPresets === 1 ? ' entry that is not a preset' : ' entries that are not presets') : '', oldLeft.backup ? 'the older backup' : '', oldLeft.unreadableList ? 'the unreadable old list' : ''].filter(Boolean).join(', ') : '';
       if (!window.confirm('Remove the old presets data? This removes ' + (lost || 'it') + '. Presets in your list stay. This cannot be undone (download it first to keep a copy).')) return;
-      store.remove('presets'); store.remove('presets-unreadable');
+      store.remove('presets'); store.remove('presets-unreadable'); store.remove('presets-waiting');
       loadMine();
       status = 'Removed the old presets data.';
       render('#pe-status');
@@ -587,7 +601,7 @@
     var g = editing.draft.groups[i];
     if (f === 'label') {
       var own = dlg.querySelector('#po-' + i);
-      if (t.value === OWN) { g.own = true; own.hidden = false; g.label = own.value; if (e.type === 'change') own.focus(); }
+      if (t.value === OWN) { g.own = true; own.hidden = false; g.label = own.value; if (e.type === 'change' && Date.now() - lastArrowAt > 400) own.focus(); }
       else { g.own = false; own.hidden = true; g.label = t.value; }
     } else if (f === 'own') g.label = t.value;
     else if (f === 'b0' || f === 'b1') {
@@ -619,6 +633,9 @@
     // one; if the dialog is closed anyway, it reopens with the draft.
     var escAsked = false, keepOpen = false;
     dlg.addEventListener('keydown', function (e) {
+      // Arrow keys on a closed drop-down change it as they go; remember that, so
+      // passing "Type your own…" does not pull focus into the text box.
+      if (e.target.tagName === 'SELECT' && /^(Arrow|Home|End|Page)/.test(e.key)) lastArrowAt = Date.now();
       if (e.key !== 'Escape' || !dirty()) return;
       e.preventDefault(); e.stopPropagation();
       escAsked = true; setTimeout(function () { escAsked = false; }, 0);

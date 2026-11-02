@@ -44,7 +44,7 @@
   function textEm(text) {
     var w = 0;
     String(text).replace(/[\s\S]/g, function (c) {
-      w += WIDE.test(c) ? 1 : /[A-Z0-9#?]/.test(c) || /\p{Lu}/u.test(c) ? 0.75 : /[\s.,:;'!|ilI1jtfr]/.test(c) ? 0.35 : /[\uDC00-\uDFFF]/.test(c) ? 0 : 0.62;
+      w += c === '﷽' ? 4 : /[—―⸺⸻Ⅰ-ↈ　-〿]/.test(c) ? 1.1 : WIDE.test(c) ? 1 : /[A-Z0-9#?]/.test(c) || /\p{Lu}/u.test(c) ? 0.75 : /[\s.,:;'!|ilI1jtfr]/.test(c) ? 0.35 : /[\uDC00-\uDFFF]/.test(c) ? 0 : 0.62;
       return c;
     });
     return w;
