@@ -105,7 +105,7 @@
         var goodId = firstOfId && !used[p.id];
         if (typeof p.id === 'string') seenIds[p.id] = 1;
         if (have[contentKey(p)]) { moved = true; return; } // an exact copy is stored: already moved
-        if (ranBefore && waitRoom.indexOf(contentKey(p)) < 0) { unsure++; waiting.push({ i: keep.length, name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
+        if (ranBefore && waitRoom.indexOf(contentKey(p)) < 0) { unsure++; waiting.push({ k: entryKey(p), name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
         if (!freeName) freeName = nameFreer();
@@ -116,7 +116,8 @@
       // This version moved (part of) the list: say so, and remember the
       // entries still waiting for room, the only ones tried again unasked.
       if (!ranBefore || waitRoom.length) {
-        store.setRaw('presets-moved', '1');
+        // Also the flags versions 17-27 check, so an older version opened later does not move it again.
+        store.setRaw('presets-moved', '1'); store.setRaw('presets-migrated', '1'); store.setRaw('presets-migrated-2', '1');
         if (stillWaiting.length) store.setRaw('presets-waiting', JSON.stringify(stillWaiting)); else store.remove('presets-waiting');
       }
     }
@@ -141,19 +142,32 @@
       return out;
     };
   }
+  // A short key for an old entry's contents: each Restore button names its
+  // entry by this, not by its place in the list, which an older version open
+  // in another tab can change at any time (version-28 restored the wrong one).
+  function entryKey(p) {
+    var s = contentKey(p), h1 = 5381, h2 = 52711;
+    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
+    return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + s.length.toString(36);
+  }
+  // Returns the names restored. only: an entry's key (one entry), or null (all).
+  var gone = false;
   function restoreOld(only) {
-    var o = oldList(); if (!o.list) return 0;
-    var used = builtInIds(), keep = [], n = 0, have = Object.create(null), free = nameFreer();
+    gone = false;
+    var o = oldList(); if (!o.list) { gone = only != null; return []; }
+    var used = builtInIds(), keep = [], names = [], found = false, have = Object.create(null), free = nameFreer();
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
-    o.list.forEach(function (p, i) {
-      if (!presetLike(p) || (only != null && i !== only)) { keep.push(p); return; }
+    o.list.forEach(function (p) {
+      if (!presetLike(p) || (only != null && (found || entryKey(p) !== only))) { keep.push(p); return; }
+      found = true;
       if (have[contentKey(p)]) return; // stored already
       have[contentKey(p)] = 1;
-      var id = freeId(p.name, used);
-      if (store.set(KEY + id, Object.assign({}, p, { id: id, name: free(p.name) }))) { used[id] = 1; n++; } else keep.push(p);
+      var id = freeId(p.name, used), name = free(p.name);
+      if (store.set(KEY + id, Object.assign({}, p, { id: id, name: name }))) { used[id] = 1; names.push(typeof name === 'string' ? name : '(no name)'); } else keep.push(p);
     });
+    gone = only != null && !found;
     writeOld(keep);
-    return n;
+    return names;
   }
   function downloadOld() {
     var a = document.createElement('a'), out = { 'alpha.presets': store.raw('presets'), 'alpha.presets-unreadable': store.raw('presets-unreadable') };
@@ -239,7 +253,17 @@
   }
   // A free name that still fits the length limit.
   // Cuts text to n UTF-16 units without splitting a character (an emoji is two).
-  function cut(s, n) { s = s.slice(0, n); return /[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s; }
+  // Cuts between characters as seen on screen (an emoji with its joiners and
+  // skin tone, a flag, a Hindi conjunct stays whole), so no stray joiner is left.
+  function cut(s, n) {
+    if (s.length <= n) return s;
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      var out = '', it = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)[Symbol.iterator](), g;
+      while (!(g = it.next()).done && out.length + g.value.segment.length <= n) out += g.value.segment;
+      return out;
+    }
+    s = s.slice(0, n); return /[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s;
+  }
   function uniqueName(name) {
     var taken = Object.create(null), out = cut(name, P.MAX_NAME), n = 2;
     all(Alpha.state.ds).forEach(function (p) { taken[P.sameKey(p.name)] = 1; });
@@ -350,7 +374,7 @@
         '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
         (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore ' + (oldLeft.unsure === 1 ? 'it' : 'all ' + oldLeft.unsure) + '</button>' : '') +
         (oldLeft.waiting && oldLeft.waiting.length ? '<ul class="old-waiting">' + oldLeft.waiting.map(function (w) {
-          return '<li>' + esc(w.name) + ' <button type="button" class="btn small" data-act="old-restore-one" data-i="' + w.i + '" aria-label="Restore ' + esc(w.name) + '">Restore</button></li>';
+          return '<li>' + esc(w.name) + ' <button type="button" class="btn small" data-act="old-restore-one" data-k="' + esc(w.k) + '" aria-label="Restore ' + esc(w.name) + '">Restore</button></li>';
         }).join('') + '</ul>' : '') +
         // Not while old presets still wait to be copied: removing would lose them.
         (notMigrated ? ' (Remove is offered once the waiting presets are copied.)' : ' <button type="button" class="btn small" data-act="old-rm">Remove old data</button>') + '</div>' : '') +
@@ -440,7 +464,13 @@
 
   function save(andUse) {
     editing.tried = true;
-    if (showErrors().length) { dlg.querySelector('#pe-errors').scrollIntoView({ block: 'nearest' }); return; }
+    var errs0 = showErrors();
+    if (errs0.length) {
+      // Said every time Save is pressed, not only when the list of problems changes.
+      announce('Not saved: ' + errs0.length + ' thing' + (errs0.length > 1 ? 's' : '') + ' to fix. ' + errs0[0], true);
+      dlg.querySelector('#pe-errors').scrollIntoView({ block: 'nearest' });
+      return;
+    }
     var t = P.tidy(editing.draft);
     if (editing.origId) {
       // Deleted in another window while being edited? Ask before bringing it back.
@@ -521,8 +551,12 @@
     else if (act === 'download') download(p);
     else if (act === 'old-dl') downloadOld();
     else if (act === 'old-restore' || act === 'old-restore-one') {
-      var got = restoreOld(act === 'old-restore-one' ? Number(b.getAttribute('data-i')) : null); loadMine(); Alpha.settings.notify();
-      status = got ? 'Restored ' + got + ' preset' + (got === 1 ? '' : 's') + ' from the older version.' : 'Nothing could be restored (this browser\'s storage may be full).';
+      var got = restoreOld(act === 'old-restore-one' ? b.getAttribute('data-k') : null); loadMine(); Alpha.settings.notify();
+      status = got.length ? 'Restored ' + got.length + ' preset' + (got.length === 1 ? '' : 's') + ' from the older version: ' +
+          got.slice(0, 10).map(function (n) { return '"' + n + '"'; }).join(', ') + (got.length > 10 ? ' and ' + (got.length - 10) + ' more' : '') + '.'
+        : act === 'old-restore-one' && !gone ? 'Nothing could be restored (this browser\'s storage may be full).'
+        : act === 'old-restore-one' ? 'That entry is no longer in the old list (another window changed it); nothing was restored. The list below is up to date.'
+        : 'Nothing could be restored (this browser\'s storage may be full).';
       render('#pe-status');
     }
     else if (act === 'old-rm') {
@@ -663,7 +697,8 @@
     window.addEventListener('beforeunload', function (e) { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
     // Another window saved or deleted a preset: reload the list.
     window.addEventListener('storage', function (e) {
-      if (e.key != null && e.key.indexOf('alpha.' + KEY) !== 0) return;
+      // The old list too: an older version open in another tab can write it again.
+      if (e.key != null && e.key.indexOf('alpha.' + KEY) !== 0 && e.key !== 'alpha.presets') return;
       loadMine();
       var renamed = renameClashes();
       Alpha.settings.notify();

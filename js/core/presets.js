@@ -34,7 +34,9 @@
   // Runs of spaces, tabs and zero-width characters look like one space on
   // screen, and "\u00E9" can be one character or "e" plus an accent: both are
   // stored the same way (NFC), so look-alike text compares as equal.
-  function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B\u200C\uFEFF]+/g, ' ').trim() : ''; }
+  // (A zero-width non-joiner is not turned into a space: Persian words need it;
+  // where it is not needed, the check refuses it as invisible.)
+  function clean(s) { return isStr(s) ? s.normalize('NFC').replace(/[\s\u200B\uFEFF]+/g, ' ').trim() : ''; }
   // The form used to compare names and labels: also folds compatibility
   // forms (fullwidth letters, ligatures such as "ﬁ") and case.
   // Letters from other alphabets that look like Latin letters, mapped to
