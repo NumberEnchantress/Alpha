@@ -144,31 +144,56 @@
       // (no layout read while typing); until then the label is drawn, and it
       // moves to the caption a frame later if it turns out under MIN_PX.
       if (ro && cache) ro.unobserve(cache.node);
-      box.innerHTML = drawing(loc); cache = { unit: loc.unit, node: box.firstChild };
+      box.innerHTML = drawing(loc); cache = { unit: loc.unit, node: box.firstChild, minH: minSize(loc.unit).h, minW: minSize(loc.unit).w };
       if (ro) ro.observe(cache.node);
     }
+    // Never so short that shelf numbers drop under MIN_PX (Large and Larger
+    // text leave less room): the pane scrolls instead.
+    box.style.minHeight = cache.minH + 'px';
+    box.style.minWidth = cache.minW + 'px';
     last = { svg: cache.node, loc: loc, p: p, el: el };
     place(last);
     keepShown(el);
   }
+  // Height and width in pixels at which a unit's shelf numbers are MIN_PX
+  // (plus a margin; the width also covers the box's side padding).
+  function minSize(u) {
+    var n = u.shelves, rowH = Math.min(14, 150 / n), H = 4 + n * rowH + 6, per = (MIN_PX + 0.5) / Math.min(7, rowH * 0.6);
+    return { h: Math.ceil(H * per), w: Math.ceil(100 * per) + 16 };
+  }
   var cache = null;
 
-  // Between 761 and 1100 px wide the page scrolls (the search pane stays in
-  // place beside it): the highlighted shelf and the caption are scrolled
-  // into view when they are off screen. Measured a frame later, after the
-  // browser's own layout, so typing does not wait for it.
+  // The highlighted shelf and the caption are scrolled into view when they
+  // are off screen: inside the shelf pane when it scrolls (large text), and,
+  // between 761 and 1100 px wide, the page (the search pane stays in place
+  // beside it). When both do not fit, the shelf wins. Measured a frame
+  // later, after the browser's own layout, so typing does not wait for it.
   var mq = window.matchMedia ? window.matchMedia('(min-width: 761px) and (max-width: 1100px)') : null, pending = false;
+  function span(g, cap) {
+    var a = g.getBoundingClientRect(), c = cap.getBoundingClientRect();
+    return { top: Math.min(a.top, c.top), bottom: Math.max(a.bottom, c.bottom), shelfTop: a.top };
+  }
+  function into(s, top, bottom) { // how far to scroll so s fits between top and bottom
+    // when both fit, keep the top of both in view; otherwise the shelf's
+    if (s.bottom > bottom) return Math.min(s.bottom - bottom + 6, (s.bottom - s.top <= bottom - top - 12 ? s.top : s.shelfTop) - top - 6);
+    if (s.top < top) return s.top - top - 6;
+    return 0;
+  }
   function keepShown(el) {
-    if (!mq || !mq.matches || pending) return;
+    if (pending) return;
     pending = true;
     requestAnimationFrame(function () {
       pending = false;
       var g = el.querySelector('.shelf-hi, .shelf-est'), cap = el.querySelector('.elev-caption');
       if (!g || !cap) return;
-      var a = g.getBoundingClientRect(), c = cap.getBoundingClientRect();
-      var top = Math.min(a.top, c.top), bottom = Math.max(a.bottom, c.bottom);
-      if (bottom > window.innerHeight) window.scrollBy(0, Math.min(bottom - window.innerHeight + 8, top - 8));
-      else if (top < 0) window.scrollBy(0, top - 8);
+      if (el.scrollHeight > el.clientHeight + 1) {
+        var r = el.getBoundingClientRect(), d = into(span(g, cap), r.top, r.bottom);
+        if (d) el.scrollTop += d;
+      }
+      if (mq && mq.matches) {
+        var dp = into(span(g, cap), 0, window.innerHeight);
+        if (dp) window.scrollBy(0, dp);
+      }
     });
   }
 

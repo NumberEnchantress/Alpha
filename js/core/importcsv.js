@@ -15,7 +15,7 @@
 
   // Accepted column names (compared without case, spaces or punctuation).
   var COLUMNS = {
-    ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'nationaldrugcode'],
+    ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'nationaldrugcode', 'ndc11code', 'packagendc', 'itemndc', 'productndc', 'ndcpackagecode'],
     drug: ['drug', 'drugname', 'name', 'generic', 'genericname', 'description', 'product', 'productname', 'itemdescription', 'itemname', 'drugdescription', 'productdescription'],
     strength: ['strength', 'str'],
     form: ['form', 'dosageform'],
@@ -85,12 +85,28 @@
       }
       return { problem: 'This is not a text file (it looks like an image, a PDF or another kind of file), so it is not a CSV.' };
     }
+    // Valid UTF-8 characters (such as µ written as two bytes) next to bytes that
+    // are not UTF-8: two encodings in one file (rows pasted from another
+    // export). Read either way, some characters would change, so the file is
+    // refused at the first line that is not UTF-8.
+    function mixed(from) {
+      var valid = 0, bad = -1;
+      for (var i = from; i < b.length;) {
+        var c = b[i], n = c < 0x80 ? 0 : c >= 0xC2 && c <= 0xDF ? 1 : c >= 0xE0 && c <= 0xEF ? 2 : c >= 0xF0 && c <= 0xF4 ? 3 : -1, ok = n > 0;
+        if (n === 0) { i++; continue; }
+        for (var k = 1; ok && k <= n; k++) ok = i + k < b.length && b[i + k] >= 0x80 && b[i + k] <= 0xBF;
+        if (ok) { valid++; i += n + 1; } else { if (bad < 0) bad = i; i++; }
+      }
+      if (!valid || bad < 0) return null;
+      for (var j = from, line = 1; j < bad; j++) if (b[j] === 10) line++;
+      return { problem: 'Line ' + line + ' is in another encoding from the rest of the file: most of it is UTF-8, but that line has a byte that is not (Windows-1252, perhaps, from rows pasted in from another export). Read either way, some characters would change (µ would become Âµ). Save the file again as "CSV UTF-8" (or retype that line) and import again.' };
+    }
     if (b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04) return { problem: 'This is an Excel workbook (.xlsx) or another zipped file, not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
     if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return { problem: 'This is an old Excel workbook (.xls), not a CSV. In Excel, use File > Save As and choose "CSV UTF-8".' };
     if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) {
       // A UTF-8 mark followed by bytes that are not UTF-8: read the rest as Windows-1252, and say so.
       try { return { text: dec('utf-8', 3, true), encoding: 'UTF-8' }; }
-      catch (e) { return binary(3) || { text: dec('windows-1252', 3), encoding: 'Windows-1252', note: 'This file starts with a UTF-8 mark but is not UTF-8, so it was read as Windows-1252. Check that accented letters and symbols such as µ look right.' }; }
+      catch (e) { return binary(3) || mixed(3) || { text: dec('windows-1252', 3), encoding: 'Windows-1252', note: 'This file starts with a UTF-8 mark but is not UTF-8, so it was read as Windows-1252. Check that accented letters and symbols such as µ look right.' }; }
     }
     if ((b[0] === 0xFF && b[1] === 0xFE && b[2] === 0 && b[3] === 0) || (b[0] === 0 && b[1] === 0 && b[2] === 0xFE && b[3] === 0xFF)) {
       return { problem: 'This file is in UTF-32, which Alpha does not read. Save it as "CSV UTF-8" and import again.' };
@@ -105,7 +121,7 @@
       if (zeroEven > n / 2 * 0.9 && zeroOdd < n / 2 * 0.1) return { text: dec('utf-16be', 0), encoding: 'UTF-16', note: 'This file has no byte-order mark; it was read as UTF-16 because every other byte is zero.' };
     }
     var text;
-    try { text = dec('utf-8', 0, true); } catch (e) { return binary(0) || { text: dec('windows-1252', 0), encoding: 'Windows-1252', note: CP1252_NOTE }; }
+    try { text = dec('utf-8', 0, true); } catch (e) { return binary(0) || mixed(0) || { text: dec('windows-1252', 0), encoding: 'Windows-1252', note: CP1252_NOTE }; }
     if (text.indexOf('\u0000') >= 0) return { problem: 'This file contains zero bytes, so it is not a text CSV file.' };
     var bin = binary(0);
     if (bin) return bin;
@@ -209,7 +225,7 @@
       l += countBreaks(t, prev, cur);
       prev = cur;
     } });
-    return { rows: out, empty: !t.trim(), problem: problem, lastLine: lastLine };
+    return { rows: out, empty: !t.trim(), problem: problem, lastLine: lastLine, delimiter: delim };
   }
 
   // The first non-blank row is the header.
@@ -221,7 +237,7 @@
       fields.forEach(function (f, i) { if (f && !(f in o)) o[f] = r.cells[i]; });
       return { data: o, line: r.line, endLine: r.endLine, count: r.cells.length, cells: r.cells };
     });
-    return { rows: rows, fields: fields, empty: l.empty, problem: l.problem, lastLine: l.lastLine,
+    return { rows: rows, fields: fields, empty: l.empty, problem: l.problem, lastLine: l.lastLine, delimiter: l.delimiter,
       headBad: !!(head && head.endLine > head.line), headLine: head ? head.line : 1 };
   }
 
@@ -367,6 +383,15 @@
         cols.unused.push(m.unit); delete m.unit;
       }
     }
+    // A "Fridge" column of yes/no flags says whether the item is refrigerated, not which fridge unit.
+    if (m.unit) {
+      var uv = p.rows.map(function (r) { return String(r.data[m.unit] == null ? '' : r.data[m.unit]).trim().toLowerCase(); }).filter(Boolean);
+      var yn = uv.filter(function (v) { return /^(yes|no|y|n|true|false|x)$/.test(v); }).length; // not 1/0, which can be unit names
+      if (uv.length && yn * 2 >= uv.length) {
+        report.fileNotes.push('The "' + m.unit + '" column holds yes/no values, not unit names, so it was not used as the shelving unit.');
+        cols.unused.push(m.unit); delete m.unit;
+      }
+    }
 
     // Values are matched to columns by position, so every row must have
     // exactly the header's number of fields, and cells under blank header
@@ -384,15 +409,29 @@
       return r.count !== width || !p.fields.every(function (f, i) { return f || blankCell(r.cells[i]); });
     });
     if (misfits.length) {
-      var listed = misfits.slice(0, 12).map(function (r) {
-        return 'line ' + r.line + (r.count !== width ? ' (' + r.count + ' field' + (r.count > 1 ? 's' : '') + ')' : ' (a value under a column with no name)');
-      }).join(', ') + (misfits.length > 12 ? ' and ' + (misfits.length - 12) + ' more' : '');
+      // Every such line is listed in report.misfits (shown as a table, and in the report CSV).
+      var wrongCount = misfits.filter(function (r) { return r.count !== width; }), unnamed = misfits.filter(function (r) { return r.count === width; });
+      var blankCols = p.fields.map(function (f, i) { return f ? null : 'column ' + (i + 1); }).filter(Boolean);
       report.rows = 0;
-      report.misfits = misfits.map(function (r) { return { row: r.line, count: r.count }; });
-      return stop('Nothing was imported. ' + (misfits.length === 1 ? 'One line does' : misfits.length + ' lines do') + ' not have the header\'s ' + width + ' fields: ' + listed + '. ' +
-        'A line break typed inside a value splits a row in two, and an unquoted comma inside a value adds a field; either way the values cannot be matched to columns safely, so the whole file is refused. ' +
-        'Fix those lines and import again: put the line back together, put a value with a comma in quotes, and delete total or note lines. ' +
-        'If the program that wrote the file leaves off empty values at the end of a row, add the missing commas. The data in use stays as it is.');
+      report.misfits = misfits.map(function (r) {
+        var text = r.cells.map(function (c) { return String(c == null ? '' : c); }).join(p.delimiter || ',');
+        return { row: r.line, text: text.length > 80 ? text.slice(0, 79) + '…' : text,
+          why: r.count !== width ? r.count + ' field' + (r.count > 1 ? 's' : '') + '; the header has ' + width
+            : 'a value under ' + blankCols.join(' or ') + ', which has no name in the header' };
+      });
+      var listLines = function (list) { return list.slice(0, 8).map(function (r) { return r.line; }).join(', ') + (list.length > 8 ? ' and ' + (list.length - 8) + ' more (all listed below)' : ''); };
+      var msg = 'Nothing was imported, so the data in use stays as it is. ';
+      if (wrongCount.length) {
+        msg += (wrongCount.length === 1 ? 'Line ' : 'Lines ') + listLines(wrongCount) + ' do' + (wrongCount.length === 1 ? 'es' : '') + ' not have the header\'s ' + width + ' fields. ' +
+          'A line break typed inside a value splits a row in two, and an unquoted comma inside a value adds a field; either way the values cannot be matched to columns safely, so the whole file is refused. ' +
+          'Fix those lines: put a split row back on one line, put a value with a comma in quotes, and delete total or note lines. ' +
+          'If the program that wrote the file leaves off empty values at the end of a row, add the missing commas. ';
+      }
+      if (unnamed.length) {
+        msg += (unnamed.length === 1 ? 'Line ' : 'Lines ') + listLines(unnamed) + ' ha' + (unnamed.length === 1 ? 's' : 've') + ' a value under ' + blankCols.join(' or ') + ', which has no name in the header, so it cannot be known what it is (it may also be a value shifted by an unquoted comma). ' +
+          'Give that column a name in the header, or delete it. ';
+      }
+      return stop(msg + 'Then import again.');
     }
     // Text in the NDC column that is not an NDC (and not a placeholder such
     // as "N/A") is what a split or shifted row leaves there, so it refuses the
@@ -413,8 +452,8 @@
         return stop('Nothing was imported. Line ' + hr.line + ' has values but no NDC and no drug name. That is usually the second half of a row split by a line break inside a value, or a total or note line, so the values cannot be matched to columns safely. ' +
           'Put the row back together or delete the line, and import again. The data in use stays as it is.');
       } else if (/\p{L}/u.test(hv) && !ndc.normalize(hv) && !SCI.test(hv) && !PLACEHOLDER.test(hv)) {
-        return stop('Nothing was imported. Line ' + hr.line + ': the NDC column holds "' + hv.slice(0, 40) + '", which is not an NDC. Text there usually means a row was split by a line break inside a value or shifted by a comma, so the values cannot be matched to columns safely. ' +
-          'Fix that line and import again; if the product has no NDC, leave the cell empty or write N/A. The data in use stays as it is.');
+        return stop('Nothing was imported. Line ' + hr.line + ': the NDC column holds "' + hv.slice(0, 40) + '", which is not an NDC. That is a total or note line, or a row split by a line break inside a value or shifted by a comma, so the values cannot be matched to columns safely. ' +
+          'Delete a total or note line, or fix the row, and import again; if the product has no NDC, leave the cell empty or write N/A. The data in use stays as it is.');
       }
     }
     // A value that starts with a space, in a column whose values do not, is
@@ -443,7 +482,7 @@
       var sp = splitAt(row);
       if (sp > 0) {
         report.skipped.push({ row: line, ndc: rawNdc, reason: 'the "' + (p.fields[sp] || 'column ' + (sp + 1)) + '" value "' + String(row.cells[sp]).slice(0, 30) +
-          '" starts with a space, which usually means an unquoted comma split a value, so its values may be shifted and cannot be matched to columns safely' });
+          '" starts with a space, unlike the rest of that column. With the right field count, that is what an unquoted comma inside a value leaves when another value in the row is missing (the values between are shifted), so the row is not imported. If the export pads values with spaces, remove the spaces and import again' });
         return;
       }
       if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
@@ -577,7 +616,7 @@
     // A drug name next to the NDC is fine in a robot list; Location, Shelf or Robot columns mean a products file.
     var looksProducts = first.map(key).filter(function (h) { return ['location', 'shelf', 'robot', 'preferred'].some(function (c) { return COLUMNS[c].indexOf(h) >= 0; }); });
     if (looksProducts.length) {
-      report.problem = 'This looks like a products file (it has columns such as "' + first.filter(function (h) { return looksProducts.indexOf(key(h)) >= 0; }).slice(0, 2).join('", "') + '"), not a robot list, so it was not used. Choose the robot list (one column of NDCs) and import again.';
+      report.problem = 'This looks like a products file (it has columns such as "' + first.filter(function (h) { return looksProducts.indexOf(key(h)) >= 0; }).slice(0, 2).join('", "') + '"), not a robot list, so it was not used. Choose the robot list (one column of NDCs; a drug name beside it is fine), or delete those columns from it, and import again.';
       report.fatal = true; return report;
     }
     first.map(key).forEach(function (h, i) { if (at < 0 && COLUMNS.ndc.indexOf(h) >= 0) at = i; });

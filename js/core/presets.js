@@ -64,7 +64,8 @@
     // more Cyrillic, Greek, Coptic and Latin look-alikes; Canadian syllabics
     '\u04AE': 'Y', '\u04AF': 'y', '\u050C': 'G', '\u03F9': 'C', '\u2C99': 'm', '\u0196': 'I',
     '\u15EA': 'D', '\u15C5': 'A', '\u1455': 'C', '\u146D': 'P', '\u14AA': 'L', '\u157C': 'H', '\u15F7': 'B', '\u144E': 'N', '\u1515': 'S',
-    '\u142F': 'V', '\u15EF': 'W', '\u15F0': 'M', '\u166D': 'X', '\u1541': 'x', '\u1587': 'R'
+    '\u142F': 'V', '\u15EF': 'W', '\u15F0': 'M', '\u166D': 'X', '\u1541': 'x', '\u1587': 'R',
+    '\u04C0': 'I', '\u0474': 'V', '\u0475': 'v', '\uA646': 'I', '\uA647': 'i'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -78,17 +79,20 @@
     // Look-alikes are mapped before and after NFKC, which turns some of
     // them (lunate sigma, U+03F9) into letters that look different.
     var skel = function (x) { return x.replace(/[^\x00-\x7F]/g, function (c) { return SKELETON[c] || c; }); };
-    return skel(skel(clean(s)).normalize('NFKC').replace(IGNORABLE, '')).toLowerCase();
+    // NFD first, so precomposed letters ("Ё", "Ӓ") are mapped by their base letter.
+    return skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
   function map() { return Object.create(null); } // no inherited keys such as "constructor"
   // Invisible characters (control codes, zero-width, soft hyphen, direction
   // marks, variation selectors, tag characters, blank braille) are refused.
-  var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{13430}-\u{1343F}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
+  var INVISIBLE = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D159}\u{1D173}-\u{1D17A}\u{13430}-\u{1343F}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
   // Emoji joined by zero-width joiners, with their variation selectors, are visible.
   // So are keycaps ("1" + U+FE0F + U+20E3) and tag-sequence flags (England, Scotland, Wales).
-  var EMOJI = /[0-9#*]\uFE0F?\u20E3|\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}|\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
+  // Only the three flags made of tag characters exist (England, Scotland, Wales);
+  // any other run of tag characters is hidden text.
+  var EMOJI = /[0-9#*]\uFE0F?\u20E3|\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?)*/gu;
   // Also refused: any format character, unassigned or private-use code point,
   // and control code other than spacing (a joiner inside an emoji is fine).
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
@@ -137,7 +141,17 @@
     var words = sameKey(name).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
     // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
     var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
-    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) { return words.some(function (w) { return w.indexOf(STEM[id]) === 0; }); });
+    // Other common colour words, by the standard colour they must look like.
+    var ALSO = { crimson: 'red', scarlet: 'red', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
+      navy: 'blue', azure: 'blue', cobalt: 'blue', sky: 'blue', teal: 'blue', turquois: 'blue', aqua: 'blue', cyan: 'blue', sapphire: 'blue',
+      lime: 'green', olive: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
+      violet: 'purple', lavender: 'purple', lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
+      magenta: 'pink', fuchsia: 'pink', rose: 'pink', salmon: 'pink',
+      gold: 'yellow', lemon: 'yellow', mustard: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
+      charcoal: 'grey', slate: 'grey', silver: 'grey', ivory: 'white', cream: 'white', snow: 'white', ebony: 'black', jet: 'black', onyx: 'black' };
+    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) {
+      return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return ALSO[a] === id && w.indexOf(a) === 0; }); });
+    });
     if (found.length !== 1) return false; // none, or a mix such as "blue-green"
     var w = found[0], v = hsl(hex), h = v[0], s = v[1], l = v[2];
     if (w === 'black') return l > 0.3;
