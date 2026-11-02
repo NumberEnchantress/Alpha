@@ -36,5 +36,18 @@
 
   var SVGNS = 'http://www.w3.org/2000/svg';
 
-  Alpha.ui = { esc: esc, known: known, show: show, yesNo: yesNo, UNKNOWN: UNKNOWN, store: store, SVGNS: SVGNS };
+  // Width of bold text in em, estimated per character (no layout read): wide
+  // letters (W, M, m, w, Ж, Ш, CJK) about 1, capitals and digits 0.72, narrow
+  // ones (i, l, 1, punctuation, space) 0.35, the rest 0.62. On the generous
+  // side, so labels sized or avoided by it are not cut or covered.
+  var WIDE = /[WMÆŒ@%&mwЖШЩЮФЫжшщюфыᗪᗅ]|[ᄀ-ᇿ⺀-꓏가-힯豈-﫿︰-﹏＀-｠￠-￦]|[\uD800-\uDBFF]/;
+  function textEm(text) {
+    var w = 0;
+    String(text).replace(/[\s\S]/g, function (c) {
+      w += WIDE.test(c) ? 1 : /[A-Z0-9#?]/.test(c) || /\p{Lu}/u.test(c) ? 0.75 : /[\s.,:;'!|ilI1jtfr]/.test(c) ? 0.35 : /[\uDC00-\uDFFF]/.test(c) ? 0 : 0.62;
+      return c;
+    });
+    return w;
+  }
+  Alpha.ui = { esc: esc, known: known, show: show, yesNo: yesNo, UNKNOWN: UNKNOWN, store: store, SVGNS: SVGNS, textEm: textEm };
 })(window.Alpha);

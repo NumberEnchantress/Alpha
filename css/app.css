@@ -113,6 +113,13 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .elev-caption { margin: 0; padding: .45rem .6rem; font-weight: 700; font-size: 1.05rem; border-top: 1px solid #ddd; }
 .elev-caption.estimated { background: var(--est); border-top: 2px dashed #000; }
 .elev-caption.unknown { background: #eee; }
+/* Where the shelf pane scrolls (large text), its caption stays pinned to the
+   pane's bottom, so the drug name moved off the drawing is never scrolled away. */
+@media (min-width: 761px) {
+  .elev > .elev-caption { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
+  .elev > .elev-caption.estimated { background: var(--est); }
+  .elev > .elev-caption.unknown { background: #eee; }
+}
 .elev-msg { padding: .8rem; color: var(--muted); margin: 0; }
 .elev-robot { margin: .6rem; padding: 2rem 1rem; text-align: center; font-size: 1.6rem; font-weight: 800; background: #e8dcf5; border: 3px solid #000; border-radius: 10px; }
 .elev svg text { text-anchor: middle; dominant-baseline: central; font-family: var(--font); pointer-events: none; }
@@ -154,6 +161,9 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .elev > * { grid-column: 1; }
   .elev > .elev-draw { grid-column: 2; grid-row: 1 / 5; min-height: 0; }
   .elev > .elev-caption { grid-row: 4; border-top: 0; }
+  /* Large and Larger text: the column beside the drawing is too narrow for the
+     caption, so it runs the full width under the drawing (pinned, see above). */
+  [data-scale="1.15"] .elev > .elev-caption, [data-scale="1.3"] .elev > .elev-caption { grid-column: 1 / -1; grid-row: 5; border-top: 1px solid #ddd; }
 }
 /* Phone width: one column (search, map, shelf). Panes size to their content
    here (size containment would collapse them), the top bar wraps, and the
@@ -270,7 +280,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .pe-table td:nth-child(2) select, .pe-table .own-label { width: 100%; max-width: none; }
   .pe-table td:nth-child(3)::before { content: "Basket 1 "; }
   .pe-table td:nth-child(4)::before { content: "Basket 2 "; }
-  .pe-table td:nth-child(3) select, .pe-table td:nth-child(4) select { max-width: calc(100% - 6.5rem); }
+  .pe-table td:nth-child(3)::before, .pe-table td:nth-child(4)::before { display: block; }
+  .pe-table td:nth-child(3) select, .pe-table td:nth-child(4) select { width: calc(100% - 1.9rem); max-width: 18rem; }
 }
 .pe-errors { color: var(--danger-line); font-weight: 600; margin: .4rem 0; padding-left: 1.2rem; }
 .pe-errors:empty { display: none; }

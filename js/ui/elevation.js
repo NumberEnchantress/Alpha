@@ -86,8 +86,8 @@
     var y = Number(g.getAttribute('data-y')), h = Number(g.getAttribute('data-h'));
     var line1 = trim(p.drug, 26), line2 = (p.strength || '') + (est ? ' · ≈ ESTIMATED' : '');
     // Both lines share one size that fits the row height and the shelf width (80 units).
-    var widest = Math.max(line1.length, line2.length, 8);
-    var fs = Math.min(5.6, h * 0.4, 80 / (widest * 0.7)); // bold text is about 0.7em per character
+    var widest = Math.max(Alpha.ui.textEm(line1), Alpha.ui.textEm(line2), 5); // in em (bold), see ui.textEm
+    var fs = Math.min(5.6, h * 0.4, 80 / widest);
     var shown = !svg.__scale || fs * svg.__scale >= MIN_PX;
     if (shown) {
       g.appendChild(text('s-label', y + h / 2 - fs * 0.55, fs, line1));
@@ -169,13 +169,16 @@
   // beside it). When both do not fit, the shelf wins. Measured a frame
   // later, after the browser's own layout, so typing does not wait for it.
   var mq = window.matchMedia ? window.matchMedia('(min-width: 761px) and (max-width: 1100px)') : null, pending = false;
-  function span(g, cap) {
-    var a = g.getBoundingClientRect(), c = cap.getBoundingClientRect();
-    return { top: Math.min(a.top, c.top), bottom: Math.max(a.bottom, c.bottom), shelfTop: a.top };
+  // The vertical span of some boxes (null ones skipped).
+  function span(list) {
+    var top = Infinity, bottom = -Infinity;
+    list.forEach(function (b) { if (b) { top = Math.min(top, b.top); bottom = Math.max(bottom, b.bottom); } });
+    return { top: top, bottom: bottom };
   }
-  function into(s, top, bottom) { // how far to scroll so s fits between top and bottom
-    // when both fit, keep the top of both in view; otherwise the shelf's
-    if (s.bottom > bottom) return Math.min(s.bottom - bottom + 6, (s.bottom - s.top <= bottom - top - 12 ? s.top : s.shelfTop) - top - 6);
+  // How far to scroll so that span s fits between top and bottom; when it
+  // cannot fit, its top (keep) stays in view.
+  function into(s, top, bottom, keep) {
+    if (s.bottom > bottom) return Math.min(s.bottom - bottom + 6, (s.bottom - s.top <= bottom - top - 12 ? s.top : keep) - top - 6);
     if (s.top < top) return s.top - top - 6;
     return 0;
   }
@@ -186,12 +189,22 @@
       pending = false;
       var g = el.querySelector('.shelf-hi, .shelf-est'), cap = el.querySelector('.elev-caption');
       if (!g || !cap) return;
+      // 1. Inside the shelf pane, when it scrolls: the caption stays pinned to
+      // the pane's bottom (CSS), so the shelf has to show above it.
       if (el.scrollHeight > el.clientHeight + 1) {
-        var r = el.getBoundingClientRect(), d = into(span(g, cap), r.top, r.bottom);
+        var r = el.getBoundingClientRect(), a = g.getBoundingClientRect(), c = cap.getBoundingClientRect();
+        var bottom = c.left < a.right && c.right > a.left ? Math.min(r.bottom, c.top) : r.bottom;
+        var d = into({ top: a.top, bottom: a.bottom }, r.top, bottom, a.top);
         if (d) el.scrollTop += d;
       }
+      // 2. The page (761-1100 px wide): the shelf and caption, and the map
+      // marker too when all of them fit on screen.
       if (mq && mq.matches) {
-        var dp = into(span(g, cap), 0, window.innerHeight);
+        var a2 = g.getBoundingClientRect(), c2 = cap.getBoundingClientRect();
+        var mk = document.querySelector('#map-marker[visibility="visible"] .marker-dot');
+        var must = span([a2, c2]), all = span([a2, c2, mk && mk.getBoundingClientRect()]);
+        var s = all.bottom - all.top <= window.innerHeight - 12 ? all : must;
+        var dp = into(s, 0, window.innerHeight, a2.top);
         if (dp) window.scrollBy(0, dp);
       }
     });

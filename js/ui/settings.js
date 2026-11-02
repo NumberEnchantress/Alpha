@@ -27,7 +27,8 @@
       // each custom rule must be a rule: an object with a text id, a message and a condition
       ('custom' in p && (!Array.isArray(p.custom) || !p.custom.every(function (r) {
         // the same checks as rules in the data file
-        return plain(r) && typeof r.id === 'string' && r.id && !Alpha.rules.compile([r], Alpha.rules.PRODUCT_FIELDS).errors.length;
+        var c = plain(r) && typeof r.id === 'string' && r.id && Alpha.rules.compile([r], Alpha.rules.PRODUCT_FIELDS);
+        return !!c && !c.errors.length && !c.warnings.length; // a warning (an unknown field) means it was edited by hand and would never fire
       })));
   }
   function keepCopy(raw) {
@@ -60,7 +61,7 @@
     if (saved) unreadable = false;
   }
   usable = store.usable(); saved = usable; // false when the browser blocks storage
-  function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); }
+  function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); document.documentElement.setAttribute('data-scale', prefs.scale); }
 
   // The basket preset in use: built-in (data file) or the user's own.
   function scheme(ds) {
@@ -120,7 +121,9 @@
     else if (!saved) h += '<p class="note-bad">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
     if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. ' +
       (backupKey ? 'A copy of them was kept in this browser as alpha.' + esc(backupKey) + '; the next change you make here replaces the unreadable settings.'
-        : 'No copy could be kept (the storage in this browser is full, or 20 earlier copies are already kept), so they are left as they are and changes made here are not saved.') + '</p>';
+        : 'No copy could be kept (the storage in this browser is full, or 20 earlier copies are already kept), so they are left as they are and changes made here are not saved. ' +
+          '<button type="button" class="btn small" data-act="prefs-copies-dl">Download them and the kept copies</button> ' +
+          (copyKeys().length ? '<button type="button" class="btn small" data-act="prefs-copies-rm">Remove the ' + copyKeys().length + ' kept copies</button>' : '')) + '</p>';
 
     var builtIns = {};
     (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });
@@ -205,7 +208,26 @@
       save(); changed();
     }
   }
+  // The kept copies of unreadable settings (alpha.prefs-unreadable, -2 ... -20).
+  function copyKeys() { return store.keys('prefs-unreadable').filter(function (k) { return /^prefs-unreadable(-\d+)?$/.test(k); }); }
   function onDialogClick(e) {
+    var act = e.target.closest('[data-act]'), a = act && act.getAttribute('data-act');
+    if (a === 'prefs-copies-dl') {
+      var out = { 'alpha.prefs': store.raw('prefs') };
+      copyKeys().forEach(function (k) { out['alpha.' + k] = store.raw(k); });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2) + '\n'], { type: 'application/json' }));
+      link.download = 'unreadable-settings.json';
+      document.body.appendChild(link); link.click(); link.remove();
+      return;
+    }
+    if (a === 'prefs-copies-rm') {
+      var keys = copyKeys();
+      if (!window.confirm('Remove the ' + keys.length + ' kept copies of unreadable settings? This cannot be undone (download them first to keep them). The unreadable settings themselves are then copied once more, and changes here are saved again.')) return;
+      keys.forEach(function (k) { store.remove(k); });
+      load(); build();
+      return;
+    }
     var del = e.target.closest('[data-del]');
     if (del) {
       var id = del.getAttribute('data-del');
