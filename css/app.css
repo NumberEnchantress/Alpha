@@ -43,6 +43,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .pane { background: var(--panel); border: 1px solid #c8c8c2; border-radius: 8px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; contain: strict; }
 .pane-title { font-size: 1rem; margin: 0; padding: .35rem .7rem; border-bottom: 1px solid #ddd; color: var(--muted); font-weight: 600; }
 .pane-side { overflow: hidden; }
+/* Long unbroken names ("ETHINYLESTRADIOL/NORETHINDRONE") wrap instead of widening a pane. */
+.pane { overflow-wrap: anywhere; }
 
 /* Search */
 .search { padding: .6rem .7rem .3rem; }
@@ -140,7 +142,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 @media (max-width: 1100px) {
   body { overflow-y: auto; }
   .grid { flex: 1 0 auto; }
-  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) clamp(18rem, 40vw, 24rem); grid-template-rows: minmax(430px, 43fr) minmax(390px, 39fr); grid-template-areas: "map side" "elev side"; }
+  .grid, .grid.has-elev { grid-template-columns: minmax(0, 1fr) clamp(18rem, 40vw, 24rem); grid-template-rows: minmax(300px, 52fr) minmax(360px, 48fr); grid-template-areas: "map side" "elev side"; }
   .grid:not(.has-elev) { grid-template-rows: minmax(430px, 1fr) 0; }
   .grid .pane-map { grid-area: map; }
   .grid .pane-side { grid-area: side; position: sticky; top: .5rem; align-self: start; height: calc(100vh - 4.2rem); max-height: 100%; }
@@ -165,7 +167,8 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   .pane-map { height: 440px; }
   .grid.has-elev .pane-elev { display: flex; }
   .elev { display: flex; }
-  .elev > .elev-draw { min-height: 20rem; }
+  /* Tall enough for shelf numbers of at least 11 px, short enough to see the caption below it. */
+  .elev > .elev-draw { flex: none; height: 62vh; min-height: 20rem; max-height: 36rem; }
 }
 
 /* Map drawing. Strokes are screen pixels (non-scaling), so they look the same on any floor size. */

@@ -52,15 +52,15 @@
      list. So an entry is moved once at most, and a preset deleted later has
      nothing to come back from. An entry that does not fit (full storage)
      stays in the old list and is tried again on the next load; nothing else
-     is retried. An entry already stored with the same contents counts as
-     moved (a move whose second step did not happen). Missing, bad, repeated
-     or taken ids get a new id.
-     Versions 17-21 copied entries with good ids but left the old list as it
-     was. With their flag ("alpha.presets-migrated") set, an entry whose id is
-     stored now counts as moved (renamed since, perhaps); an entry whose id is
-     not stored was deleted since, or was never copied (those versions could
-     skip it when storage was full): it is not brought back unasked, but kept
-     and shown with "Restore them". Entries that are not presets, an old list
+     is retried. An entry already stored with exactly the same contents
+     counts as moved (a move whose second step did not happen). Missing, bad,
+     repeated or taken ids get a new id.
+     Versions 17-21 ("alpha.presets-migrated") and 22-23
+     ("alpha.presets-migrated-2") copied entries and left the old list as it
+     was; which entries each one copied differs. With either flag set,
+     nothing is copied unasked: an exact copy counts as moved, and every
+     other entry (deleted or changed since, or never copied) is kept and
+     shown with "Restore them". Entries that are not presets, an old list
      that cannot be read, and the version-16 backup are shown too. */
   var notMigrated = 0, oldLeft = null;
   function freeId(name, used) {
@@ -68,10 +68,13 @@
     while (used[id] || store.raw(KEY + id) != null) id = base + '-' + n++;
     return id;
   }
+  // Everything but the id, exactly as written (names and labels with their
+  // letter case, colour names too): only a true copy counts as the same.
   function contentKey(p) {
-    return JSON.stringify([P.sameKey(p.name), (Array.isArray(p.colours) ? p.colours : []).map(function (c) { return c && [c.id, String(c.hex).toLowerCase()]; }),
-      (Array.isArray(p.groups) ? p.groups : []).map(function (g) { return g && [P.sameKey(g.label), g.baskets]; })]);
+    return JSON.stringify([p.name, (Array.isArray(p.colours) ? p.colours : []).map(function (c) { return c && typeof c === 'object' ? [c.id, String(c.hex).toLowerCase(), c.name] : c; }),
+      (Array.isArray(p.groups) ? p.groups : []).map(function (g) { return g && typeof g === 'object' ? [g.label, g.baskets] : g; })]);
   }
+  function presetLike(p) { return !!p && typeof p === 'object' && !Array.isArray(p); }
   function oldList() {
     var raw = store.raw('presets'), v = null;
     if (raw != null) { try { v = JSON.parse(raw); } catch (e) { v = null; } }
@@ -81,17 +84,21 @@
   function migrateOldList() {
     notMigrated = 0; oldLeft = null;
     var o = oldList(), backup = store.raw('presets-unreadable');
-    var ranBefore = store.raw('presets-migrated') != null, notPresets = 0, unsure = 0;
+    // Versions 17-21 wrote "presets-migrated", versions 22-23 "presets-migrated-2"
+    // after copying the list (and left it in place). Either means an older
+    // version copied it already: nothing is copied again unasked.
+    var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null, notPresets = 0, unsure = 0;
     if (o.list) {
       var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false;
-      store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (q && typeof q === 'object') have[contentKey(q)] = 1; });
+      store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
       o.list.forEach(function (p) {
-        if (!p || typeof p !== 'object' || Array.isArray(p)) { notPresets++; keep.push(p); return; }
-        var goodId = typeof p.id === 'string' && ID_RE.test(p.id) && !used[p.id] && !seenIds[p.id];
+        if (!presetLike(p)) { notPresets++; keep.push(p); return; }
+        var firstOfId = typeof p.id === 'string' && ID_RE.test(p.id) && !seenIds[p.id];
+        var goodId = firstOfId && !used[p.id];
         if (typeof p.id === 'string') seenIds[p.id] = 1;
+        if (have[contentKey(p)]) { moved = true; return; } // an exact copy is stored: already moved
+        if (ranBefore) { unsure++; keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
-        if (have[contentKey(p)] || (ranBefore && stored)) { moved = true; return; } // already in the new storage
-        if (ranBefore && goodId && !stored) { unsure++; keep.push(p); return; }   // deleted since, or never copied: ask
         var id = goodId && !stored ? p.id : freeId(p.name, used);
         if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
         else { notMigrated++; keep.push(p); }
@@ -106,11 +113,12 @@
   // not stored now, are moved as new presets (with new ids).
   function restoreOld() {
     var o = oldList(); if (!o.list) return 0;
-    var used = builtInIds(), keep = [], n = 0, stored = Object.create(null);
-    store.keys(KEY).forEach(function (k) { stored[k.slice(KEY.length)] = 1; });
+    var used = builtInIds(), keep = [], n = 0, have = Object.create(null);
+    store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
     o.list.forEach(function (p) {
-      var candidate = p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && ID_RE.test(p.id) && !stored[p.id];
-      if (!candidate) { keep.push(p); return; }
+      if (!presetLike(p)) { keep.push(p); return; }
+      if (have[contentKey(p)]) return; // stored already
+      have[contentKey(p)] = 1;
       var id = freeId(p.name, used);
       if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; n++; } else keep.push(p);
     });
@@ -279,9 +287,9 @@
       (notMigrated ? '<p class="note-bad small">' + notMigrated + ' preset(s) saved by an older version of Alpha could not be copied to the new storage because this browser\'s storage is full. ' +
         'They are kept as they were and will be copied once space is freed.</p>' : '') +
       (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha could not all be read: ' +
-        [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + ' entr' + (oldLeft.notPresets === 1 ? 'y is' : 'ies are') + ' not presets' : '',
+        [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + (oldLeft.notPresets === 1 ? ' entry is not a preset' : ' entries are not presets') : '',
           oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : '',
-          oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now: deleted since, or that version could not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') : ''].filter(Boolean).join('; ') +
+          oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now as ' + (oldLeft.unsure === 1 ? 'it was' : 'they were') + ': deleted or changed since, or that version did not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') + '. Restore adds ' + (oldLeft.unsure === 1 ? 'it' : 'them') + ' as new presets' : ''].filter(Boolean).join('; ') +
         '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
         (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore them</button>' : '') +
         // Not while old presets still wait to be copied: removing would lose them.
@@ -383,7 +391,7 @@
         // Saved in another window since editing began: never overwrite it unasked.
         if (!window.confirm('This preset was changed in another window after you started editing. Save your version over those changes?')) {
           status = 'Not saved. Your changes are still in the editor; the other window\'s version is in the list above.';
-          var st0 = dlg.querySelector('#pe-status'); st0.textContent = status; st0.focus();
+          var st0 = dlg.querySelector('#pe-status'); st0.textContent = status; announce(status); st0.focus();
           return;
         }
       }
@@ -391,7 +399,7 @@
     } else t.id = uniqueId(t.name);
     if (!saveOne(t)) {
       status = 'Not saved: this browser would not store the preset (its storage may be full). Download it to keep it.';
-      var st = dlg.querySelector('#pe-status'); st.textContent = status; st.focus();
+      var st = dlg.querySelector('#pe-status'); st.textContent = status; announce(status); st.focus();
       return;
     }
     editing = null;
@@ -456,7 +464,7 @@
     }
     else if (act === 'old-rm') {
       if (notMigrated) return; // presets still waiting to be copied would be lost
-      var lost = oldLeft ? [oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' not in your list now' : '', oldLeft.notPresets ? oldLeft.notPresets + ' entr' + (oldLeft.notPresets === 1 ? 'y' : 'ies') + ' that are not presets' : '', oldLeft.backup ? 'the older backup' : '', oldLeft.unreadableList ? 'the unreadable old list' : ''].filter(Boolean).join(', ') : '';
+      var lost = oldLeft ? [oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' not in your list now' : '', oldLeft.notPresets ? oldLeft.notPresets + (oldLeft.notPresets === 1 ? ' entry that is not a preset' : ' entries that are not presets') : '', oldLeft.backup ? 'the older backup' : '', oldLeft.unreadableList ? 'the unreadable old list' : ''].filter(Boolean).join(', ') : '';
       if (!window.confirm('Remove the old presets data? This removes ' + (lost || 'it') + '. Presets in your list stay. This cannot be undone (download it first to keep a copy).')) return;
       store.remove('presets'); store.remove('presets-unreadable');
       loadMine();

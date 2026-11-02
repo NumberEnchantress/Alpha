@@ -149,8 +149,28 @@
     }
     last = { svg: cache.node, loc: loc, p: p, el: el };
     place(last);
+    keepShown(el);
   }
   var cache = null;
+
+  // Between 761 and 1100 px wide the page scrolls (the search pane stays in
+  // place beside it): the highlighted shelf and the caption are scrolled
+  // into view when they are off screen. Measured a frame later, after the
+  // browser's own layout, so typing does not wait for it.
+  var mq = window.matchMedia ? window.matchMedia('(min-width: 761px) and (max-width: 1100px)') : null, pending = false;
+  function keepShown(el) {
+    if (!mq || !mq.matches || pending) return;
+    pending = true;
+    requestAnimationFrame(function () {
+      pending = false;
+      var g = el.querySelector('.shelf-hi, .shelf-est'), cap = el.querySelector('.elev-caption');
+      if (!g || !cap) return;
+      var a = g.getBoundingClientRect(), c = cap.getBoundingClientRect();
+      var top = Math.min(a.top, c.top), bottom = Math.max(a.bottom, c.bottom);
+      if (bottom > window.innerHeight) window.scrollBy(0, Math.min(bottom - window.innerHeight + 8, top - 8));
+      else if (top < 0) window.scrollBy(0, top - 8);
+    });
+  }
 
   Alpha.elevation = { render: render };
 })(window.Alpha);

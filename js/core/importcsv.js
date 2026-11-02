@@ -17,15 +17,15 @@
   var COLUMNS = {
     ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'nationaldrugcode'],
     drug: ['drug', 'drugname', 'name', 'generic', 'genericname', 'description', 'product', 'productname', 'itemdescription', 'itemname', 'drugdescription', 'productdescription'],
-    strength: ['strength', 'str', 'dose'],
+    strength: ['strength', 'str'],
     form: ['form', 'dosageform'],
     manufacturer: ['manufacturer', 'mfr', 'mfg', 'labeler', 'maker'],
     location: ['location', 'loc', 'locationcode', 'bin', 'binlocation', 'shelflocation', 'binno', 'binnumber'],
     unit: ['unit', 'face', 'fridge', 'section'],
     shelf: ['shelf', 'shelfnumber', 'shelfno'],
-    countPerBottle: ['countperbottle', 'count', 'packsize', 'packagesize', 'bottlesize', 'qtyperbottle', 'pkgsize', 'pksize', 'pkgqty', 'packqty'],
+    countPerBottle: ['countperbottle', 'packsize', 'packagesize', 'bottlesize', 'qtyperbottle', 'pkgsize', 'pksize', 'pkgqty', 'packqty'],
     niosh: ['niosh', 'hazardous', 'nioshhazardous'],
-    safetyCap: ['safetycap', 'cap', 'safety'],
+    safetyCap: ['safetycap'],
     vial20: ['vial20', '20dram', '20dr', 'dram20'],
     vial40: ['vial40', '40dram', '40dr', 'dram40'],
     vial60: ['vial60', '60dram', '60dr', 'dram60'],
@@ -47,7 +47,21 @@
   // plain "CSV" writes on Windows). Returns { text, encoding, note } or
   // { problem } for a file that is not text at all.
   var CP1252_NOTE = 'This file is not UTF-8, so it was read as Windows-1252 (what Excel uses for plain "CSV"). Check that accented letters and symbols such as µ look right.';
+  // Every reading is checked once more as text: a control character (C0 or
+  // C1, other than tab and line breaks) in a UTF-16 file, or a byte Windows-1252
+  // leaves undefined, is named by its line, as for UTF-8.
   function decode(bytes) {
+    var r = decodeBytes(bytes);
+    if (r.text == null) return r;
+    r.text = r.text.replace(/\u001a$/, '');
+    var m = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/.exec(r.text);
+    if (m) {
+      var line = r.text.slice(0, m.index).split(/\r\n|\r|\n/).length, code = m[0].charCodeAt(0);
+      return { problem: 'Line ' + line + ' holds an invisible control character (code ' + code + (code >= 128 ? ', a byte with no meaning in ' + r.encoding : '') + '), as some barcode scanners add. Remove it and import again.' };
+    }
+    return r;
+  }
+  function decodeBytes(bytes) {
     var b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     function dec(enc, from, fatal) { return new TextDecoder(enc, { fatal: !!fatal }).decode(b.subarray(from)); }
     // Control bytes (other than tab, line breaks and form feed) do not occur in
@@ -124,22 +138,55 @@
      fields from the first row, or a later line inside it holds an NDC (so
      other rows were swallowed), or the file has one column (robot lists).
      Every record comes back with the line it starts on and ends on. */
-  var QUOTE_PROBLEM = 'a quote on this line is not closed or is out of place, so it cannot be known where this row ends and the next rows begin';
+  /* Quote marks must follow the CSV standard exactly: a quoted value starts
+     with the quote (no space before it), a quote inside it is doubled, and
+     the closing quote is followed by the delimiter or the end of the line. A
+     quote after spaces at the start of a value is refused, never read around:
+     CSV readers take it as text, which is how "a, "b, c"" files cut or merge
+     values. A quote later in a value that does not start with one (GAUZE 4"
+     PAD, ="99999...") is text to every CSV reader and cannot move a value
+     boundary, so it is kept as written. Returns { line, why } for the first
+     problem, or null. */
+  function quoteSyntax(t, delim) {
+    var n = t.length, i = 0, line = 1, D = delim.charCodeAt(0), Q = 34, NL = 10;
+    while (i <= n) {
+      if (t.charCodeAt(i) === Q) {
+        var from = line; i++;
+        for (;;) {
+          if (i >= n) return { line: from, why: QUOTE_PROBLEM };
+          var c = t.charCodeAt(i);
+          if (c === Q) { if (t.charCodeAt(i + 1) === Q) { i += 2; continue; } i++; break; }
+          // A value over several lines: Alt+Enter, or a quote never closed (see SWALLOWED).
+          if (c === NL) return { line: from, why: SWALLOWED };
+          i++;
+        }
+        if (i < n && t.charCodeAt(i) !== D && t.charCodeAt(i) !== NL) {
+          return { line: from, why: 'there is text right after a closing quote mark, so it cannot be known where that value ends (a quote inside a quoted value must be doubled: "12"" tubing")' };
+        }
+      } else {
+        var s = i;
+        while (i < n && t.charCodeAt(i) !== D && t.charCodeAt(i) !== NL) i++;
+        var f = t.slice(s, i);
+        if (/^\s+"/.test(f)) {
+          return { line: line, why: 'a quote mark comes after a space ("a, "b""). CSV does not read a quote after a space as a quote, so values could be cut or merged. Save the file as a standard CSV (Excel: File > Save As > CSV UTF-8), or remove the spaces or the quote marks' };
+        }
+      }
+      if (i >= n) break;
+      if (t.charCodeAt(i) === NL) line++;
+      i++;
+    }
+    return null;
+  }
+
+  var QUOTE_PROBLEM ='a quote on this line is not closed or is out of place, so it cannot be known where this row ends and the next rows begin';
   var SWALLOWED = 'a value that starts on this line runs over several lines. That is a line break inside a cell (Alt+Enter in Excel) or a quote that is not closed, and the two cannot be told apart safely. In Excel, Find and Replace (Ctrl+H) can replace line breaks (type Ctrl+J in Find what) with a space';
   function lines(text) {
     // Byte-order marks are dropped wherever they are (two exports pasted together).
     var t = String(text || '').replace(/﻿/g, '').replace(/\r\n?/g, '\n'), delim = delimiterOf(t);
     var out = [], prev = 0, l = 1, expected = null, problem = null;
     var lastLine = t.split('\n').length - (/\n$/.test(t) ? 1 : 0);
-    // A file written with a space after each delimiter ("a, b, c"): CSV does not
-    // read a quote after a space as a quote, so quoted values would be cut or
-    // merged. Such a file with any quote mark is refused.
-    var head = t.split('\n').filter(function (x) { return x.trim(); })[0] || '';
-    var parts = head.split(delim);
-    if (parts.length > 1 && parts.slice(1).every(function (x) { return /^ /.test(x); }) && t.indexOf('"') >= 0) {
-      var ql = t.slice(0, t.indexOf('"')).split('\n').length;
-      return { rows: [], empty: false, lastLine: lastLine, problem: { line: ql, why: 'this file is written with a space after each comma and uses quote marks, which CSV does not read as quotes after a space, so values could be cut or merged. Save it as a standard CSV (Excel: File > Save As > CSV UTF-8), or remove the quote marks' } };
-    }
+    var bad = quoteSyntax(t, delim);
+    if (bad) return { rows: [], empty: false, lastLine: lastLine, problem: bad };
     Papa.parse(t, { delimiter: delim, skipEmptyLines: false, step: function (r, parser) {
       var cur = r.meta.cursor, cells = r.data;
       var inner = cells.join('').split('\n').length - 1;
@@ -280,7 +327,9 @@
         : 'The header may end with a comma the rows do not have, or the rows may leave off empty values at the end: make the header and the rows match.') +
       ' Nothing was imported; fix the file and import again.';
   }
-  var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|tab|tabs|cap|caps|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
+  var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|mg|mcg|ug|[µμ]g|meq|oz|l|lb|tab|tabs|cap|caps|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
+  // A cell that says a value is not known.
+  var PLACEHOLDER = /^(n\/?a|none|tbd|pending|unknown|null|-+|\?+)$/i;
   function blankCell(c) { return !String(c == null ? '' : c).trim(); }
   function importProducts(text, layout) {
     var p = parse(text), cols = mapColumns(p.fields), m = cols.map;
@@ -319,15 +368,55 @@
       }
     }
 
-    // Values are matched to columns by position, so a row with a different
-    // number of fields from the header may be shifted (an unquoted comma
-    // inside a value, or a missing one): it is skipped, never guessed. There
-    // are no exceptions, not even for blank trailing fields: an extra comma
-    // plus an empty last column looks exactly like a trailing comma.
-    // Cells under blank header names must be blank too.
+    // Values are matched to columns by position, so every row must have
+    // exactly the header's number of fields, and cells under blank header
+    // names must be blank. One row that does not fit refuses the whole file:
+    // a line break typed into a value without quotes splits a row in two,
+    // and the half with the right count carries a cut value that no rule
+    // about neighbouring rows catches reliably (blank lines can sit between
+    // the halves). There are no exceptions, not even for blank trailing
+    // fields: an extra comma plus an empty last column looks exactly like a
+    // trailing comma.
     var width = p.fields.length;
     var shape = shapeProblem(p.rows, width);
     if (shape) return stop(shape);
+    var misfits = p.rows.filter(function (r) {
+      return r.count !== width || !p.fields.every(function (f, i) { return f || blankCell(r.cells[i]); });
+    });
+    if (misfits.length) {
+      var listed = misfits.slice(0, 12).map(function (r) {
+        return 'line ' + r.line + (r.count !== width ? ' (' + r.count + ' field' + (r.count > 1 ? 's' : '') + ')' : ' (a value under a column with no name)');
+      }).join(', ') + (misfits.length > 12 ? ' and ' + (misfits.length - 12) + ' more' : '');
+      report.rows = 0;
+      report.misfits = misfits.map(function (r) { return { row: r.line, count: r.count }; });
+      return stop('Nothing was imported. ' + (misfits.length === 1 ? 'One line does' : misfits.length + ' lines do') + ' not have the header\'s ' + width + ' fields: ' + listed + '. ' +
+        'A line break typed inside a value splits a row in two, and an unquoted comma inside a value adds a field; either way the values cannot be matched to columns safely, so the whole file is refused. ' +
+        'Fix those lines and import again: put the line back together, put a value with a comma in quotes, and delete total or note lines. ' +
+        'If the program that wrote the file leaves off empty values at the end of a row, add the missing commas. The data in use stays as it is.');
+    }
+    // Text in the NDC column that is not an NDC (and not a placeholder such
+    // as "N/A") is what a split or shifted row leaves there, so it refuses the
+    // file too. An NDC column name there is a second header: the same columns
+    // are skipped as a repeat, another order refuses the file.
+    var headKeys = p.fields.map(key).join(',');
+    function repeatHeader(r) {
+      return !ndc.normalize(String(r.data[m.ndc] == null ? '' : r.data[m.ndc])) && r.cells.some(function (c) { return COLUMNS.ndc.indexOf(key(c)) >= 0; });
+    }
+    for (var hi = 0; hi < p.rows.length; hi++) {
+      var hr = p.rows[hi], hv = excelText(String(hr.data[m.ndc] == null ? '' : hr.data[m.ndc]).trim());
+      if (repeatHeader(hr)) {
+        if (hr.cells.map(key).join(',') !== headKeys) {
+          return stop('Line ' + hr.line + ' looks like a second header with the columns in another order (two files pasted together?), so the rows after it cannot be matched to columns. Nothing was imported; import the parts as separate files.');
+        }
+      } else if (!hv && !String(m.drug && hr.data[m.drug] || '').trim()) {
+        // Values but no NDC and no drug name: the tail of a split row, or a total or note line.
+        return stop('Nothing was imported. Line ' + hr.line + ' has values but no NDC and no drug name. That is usually the second half of a row split by a line break inside a value, or a total or note line, so the values cannot be matched to columns safely. ' +
+          'Put the row back together or delete the line, and import again. The data in use stays as it is.');
+      } else if (/\p{L}/u.test(hv) && !ndc.normalize(hv) && !SCI.test(hv) && !PLACEHOLDER.test(hv)) {
+        return stop('Nothing was imported. Line ' + hr.line + ': the NDC column holds "' + hv.slice(0, 40) + '", which is not an NDC. Text there usually means a row was split by a line break inside a value or shifted by a comma, so the values cannot be matched to columns safely. ' +
+          'Fix that line and import again; if the product has no NDC, leave the cell empty or write N/A. The data in use stays as it is.');
+      }
+    }
     // A value that starts with a space, in a column whose values do not, is
     // what an unquoted ", " inside text leaves behind ("AMOXICILLIN, CLAV..."
     // split in two). A column where most rows (of 3 or more) start with a
@@ -340,50 +429,17 @@
       var n = 0; p.rows.forEach(function (r) { if (/^\s+\S/.test(String(r.cells[i] == null ? '' : r.cells[i]))) n++; });
       return i > 0 && !(p.rows.length >= 3 && n * 2 > p.rows.length);
     });
-    function fits(row) {
-      return row.count === width && p.fields.every(function (f, i) { return f || blankCell(row.cells[i]); });
-    }
-    // A line break typed into a value without quotes splits one row into a
-    // short row and its neighbour; the neighbour can have the right count with
-    // a cut-off value. So the rows just above and below a short row are
-    // skipped too.
-    var nearShort = {};
-    p.rows.forEach(function (r, i) {
-      if (r.count >= width) return;
-      var a = p.rows[i - 1], b = p.rows[i + 1];
-      if (a && a.endLine + 1 === r.line) nearShort[i - 1] = r.line;
-      if (b && r.endLine + 1 === b.line) nearShort[i + 1] = r.line;
-    });
-    // A second header (two exports pasted together): the same columns are
-    // skipped as a repeat; another order refuses the file.
-    var headKeys = p.fields.map(key).join(',');
-    function headerLike(r) {
-      var named = r.cells.filter(function (c) { var k = key(c); return k && Object.keys(COLUMNS).some(function (col) { return COLUMNS[col].indexOf(k) >= 0; }); });
-      return named.length >= 2 && !ndc.normalize(String(r.data[m.ndc] == null ? '' : r.data[m.ndc]));
-    }
-    for (var hi = 0; hi < p.rows.length; hi++) {
-      var hr = p.rows[hi];
-      if (headerLike(hr) && hr.cells.map(key).join(',') !== headKeys) {
-        return stop('Line ' + hr.line + ' looks like a second header with the columns in another order (two files pasted together?), so the rows after it cannot be matched to columns. Nothing was imported; import the parts as separate files.');
-      }
-    }
     function splitAt(row) {
       for (var i = 1; i < width; i++) if (spaced[i] && /^\s+\S/.test(String(row.cells[i] == null ? '' : row.cells[i]))) return i;
       return -1;
     }
 
-    p.rows.forEach(function (row, rowIndex) {
+    p.rows.forEach(function (row) {
       var r = row.data, line = row.line;
       var get = function (c) { return m[c] ? String(r[m[c]] == null ? '' : r[m[c]]).trim() : ''; };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
-      if (!fits(row)) {
-        report.skipped.push({ row: line, ndc: rawNdc, reason: row.count !== width
-          ? 'has ' + row.count + ' fields but the header has ' + width + ' (an unquoted comma inside a value, or a missing one), so its values cannot be matched to columns safely'
-          : 'has a value under a column with no name, so its values may be shifted (an unquoted comma inside a value?) and cannot be matched to columns safely' });
-        return;
-      }
-      if (headerLike(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
+      if (repeatHeader(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
       var sp = splitAt(row);
       if (sp > 0) {
         report.skipped.push({ row: line, ndc: rawNdc, reason: 'the "' + (p.fields[sp] || 'column ' + (sp + 1)) + '" value "' + String(row.cells[sp]).slice(0, 30) +
@@ -396,10 +452,6 @@
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
-      if (nearShort[rowIndex] != null) {
-        report.skipped.push({ row: line, ndc: rawNdc, reason: 'line ' + nearShort[rowIndex] + ' next to it has too few fields: a line break inside a value may have split a row there, so this row may be cut short' });
-        return;
-      }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       // A drug name with no letters ("060") is a value from another column: the row is shifted.
@@ -435,6 +487,7 @@
       if (get('notes')) prod.notes = get('notes');
 
       var loc = null, rawLoc = get('location'), unitInLoc = null;
+      if (rawLoc && PLACEHOLDER.test(rawLoc)) { note('location "' + rawLoc + '" read as not given'); rawLoc = ''; }
       if (rawLoc) {
         loc = findLocation(rawLoc, layout);
         // A unit code in the Location column ("FM-N"): its location and unit.
@@ -449,7 +502,7 @@
       }
       var unit = null, rawUnit = get('unit'), unitWhy = '';
       // A placeholder such as "-", "?" or "n/a" means no unit was given.
-      if (rawUnit && (!key(rawUnit) || /^n\/?a$/i.test(rawUnit))) { note('unit "' + rawUnit + '" read as not given'); rawUnit = ''; }
+      if (rawUnit && (!key(rawUnit) || PLACEHOLDER.test(rawUnit))) { note('unit "' + rawUnit + '" read as not given'); rawUnit = ''; }
       // Names match only when both have letters or digits (a unit may have no label).
       var sameUnit = function (u) { var r = key(rawUnit); return !!r && (r === key(u.id) || (!!key(u.label) && r === key(u.label))); };
       if (unitInLoc && (!rawUnit || sameUnit(unitInLoc))) { unit = unitInLoc; prod.unit = unit.id; }
