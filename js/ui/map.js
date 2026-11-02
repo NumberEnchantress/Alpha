@@ -26,13 +26,18 @@
     var byW = w / Math.max(2.2, text.length * 0.6), byH = h * 0.7;
     return Math.max(2 * k, Math.min(3.6 * k, byW, byH));
   }
-  // The space a label takes (bold text is about 0.62 em a character); a
-  // label can be wider than its box, and the EST. tag must not cover it.
+  // The space a label takes (bold text is about 0.62 em a character, wide
+  // letters such as W, M, @ and Æ about 1 em); a label can be wider than its
+  // box, and the EST. tag must not cover it.
   var textBoxes = [];
+  function textWidth(text) {
+    var w = 0; String(text).replace(/./gu, function (c) { w += /[WMÆŒ@%&]/.test(c) ? 1 : /[A-Z0-9#?]/.test(c) ? 0.72 : /[\s.,:;'!|ilI1]/.test(c) ? 0.35 : 0.62; return c; });
+    return w;
+  }
   function label(r, text) {
     var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text);
     if (f < minFont) minFont = f;
-    var tw = String(text).length * 0.62 * f, th = f * 1.15, v = vertical(r);
+    var tw = textWidth(text) * f, th = f * 1.15, v = vertical(r);
     textBoxes.push({ x: cx - (v ? th : tw) / 2, y: cy - (v ? tw : th) / 2, w: v ? th : tw, h: v ? tw : th });
     return '<text x="' + cx + '" y="' + cy + '" font-size="' + f + '"' +
       (vertical(r) ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '') + '>' + esc(text) + '</text>';

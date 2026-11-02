@@ -87,7 +87,7 @@
     // Versions 17-21 wrote "presets-migrated", versions 22-23 "presets-migrated-2"
     // after copying the list (and left it in place). Either means an older
     // version copied it already: nothing is copied again unasked.
-    var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null, notPresets = 0, unsure = 0;
+    var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null, notPresets = 0, unsure = 0, waiting = [];
     if (o.list) {
       var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false;
       store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
@@ -97,7 +97,7 @@
         var goodId = firstOfId && !used[p.id];
         if (typeof p.id === 'string') seenIds[p.id] = 1;
         if (have[contentKey(p)]) { moved = true; return; } // an exact copy is stored: already moved
-        if (ranBefore) { unsure++; keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
+        if (ranBefore) { unsure++; waiting.push({ i: keep.length, name: typeof p.name === 'string' && p.name.trim() ? P.clean(p.name) : '(no name)' }); keep.push(p); return; } // deleted or changed since, or never copied: ask, never bring back unasked
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
         if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
@@ -106,21 +106,31 @@
       if (moved) writeOld(keep);
     }
     if ((o.raw != null && !o.list) || notPresets || unsure || backup != null) {
-      oldLeft = { unreadableList: o.raw != null && !o.list, notPresets: notPresets, unsure: unsure, backup: backup != null };
+      oldLeft = { unreadableList: o.raw != null && !o.list, notPresets: notPresets, unsure: unsure, waiting: waiting, backup: backup != null };
     }
   }
-  // "Restore them": the entries an older version may have copied, which are
-  // not stored now, are moved as new presets (with new ids).
-  function restoreOld() {
+  // "Restore": entries an older version may have copied, which are not
+  // stored now, are moved as new presets (with new ids, and with " (2)" added
+  // to a name already in use), one (only = its place in the old list) or all.
+  function restoreOld(only) {
     var o = oldList(); if (!o.list) return 0;
-    var used = builtInIds(), keep = [], n = 0, have = Object.create(null);
+    var used = builtInIds(), keep = [], n = 0, have = Object.create(null), taken = Object.create(null);
+    builtInNames().forEach(function (k) { taken[k] = 1; });
+    store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q) && typeof q.name === 'string') taken[P.sameKey(q.name)] = 1; });
+    var free = function (name) {
+      if (typeof name !== 'string') return name;
+      var out = cut(P.clean(name), P.MAX_NAME), k = 2;
+      while (taken[P.sameKey(out)]) { var sfx = ' (' + k++ + ')'; out = cut(P.clean(name), P.MAX_NAME - sfx.length).trim() + sfx; }
+      taken[P.sameKey(out)] = 1;
+      return out;
+    };
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
-    o.list.forEach(function (p) {
-      if (!presetLike(p)) { keep.push(p); return; }
+    o.list.forEach(function (p, i) {
+      if (!presetLike(p) || (only != null && i !== only)) { keep.push(p); return; }
       if (have[contentKey(p)]) return; // stored already
       have[contentKey(p)] = 1;
       var id = freeId(p.name, used);
-      if (store.set(KEY + id, Object.assign({}, p, { id: id }))) { used[id] = 1; n++; } else keep.push(p);
+      if (store.set(KEY + id, Object.assign({}, p, { id: id, name: free(p.name) }))) { used[id] = 1; n++; } else keep.push(p);
     });
     writeOld(keep);
     return n;
@@ -264,7 +274,8 @@
       '<ul id="pe-errors" class="pe-errors" role="status" aria-live="polite"></ul>' +
       '<div class="pe-buttons"><button type="button" class="btn" data-act="save">Save</button> ' +
       '<button type="button" class="btn" data-act="save-use">Save and use</button> ' +
-      '<button type="button" class="btn" data-act="cancel">Cancel</button></div></fieldset>';
+      '<button type="button" class="btn" data-act="cancel">Cancel</button> ' +
+      '<button type="button" class="btn" data-act="dl-draft">Download draft</button></div></fieldset>';
   }
 
   // The page is drawn into #pe-body; #pe-live stays, so screen readers hear status changes.
@@ -273,7 +284,12 @@
     if (!b) { dlg.innerHTML = '<div id="pe-body"></div><p id="pe-live" class="sr" role="status" aria-live="polite"></p>'; b = dlg.querySelector('#pe-body'); }
     return b;
   }
-  function announce(text) { var l = dlg.querySelector('#pe-live'); if (l && l.textContent !== text) l.textContent = text; }
+  // again: say it even if it is the same text as before (a second failed save).
+  function announce(text, again) {
+    var l = dlg.querySelector('#pe-live'); if (!l) return;
+    if (again && l.textContent === text) { l.textContent = ''; setTimeout(function () { l.textContent = text; }, 60); }
+    else if (l.textContent !== text) l.textContent = text;
+  }
   function render(focusSel) {
     var ds = Alpha.state.ds;
     body().innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
@@ -286,12 +302,15 @@
         }).join('') + '</ul></div>' : '') +
       (notMigrated ? '<p class="note-bad small">' + notMigrated + ' preset(s) saved by an older version of Alpha could not be copied to the new storage because this browser\'s storage is full. ' +
         'They are kept as they were and will be copied once space is freed.</p>' : '') +
-      (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha could not all be read: ' +
+      (oldLeft ? '<div class="note-bad small" data-testid="old-presets">Presets data saved by an older version of Alpha needs a look: ' +
         [oldLeft.unreadableList ? 'the old preset list is not readable' : '', oldLeft.notPresets ? oldLeft.notPresets + (oldLeft.notPresets === 1 ? ' entry is not a preset' : ' entries are not presets') : '',
           oldLeft.backup ? 'there is an older backup (alpha.presets-unreadable)' : '',
           oldLeft.unsure ? oldLeft.unsure + ' preset' + (oldLeft.unsure === 1 ? '' : 's') + ' saved by an older version ' + (oldLeft.unsure === 1 ? 'is' : 'are') + ' not in your list now as ' + (oldLeft.unsure === 1 ? 'it was' : 'they were') + ': deleted or changed since, or that version did not copy ' + (oldLeft.unsure === 1 ? 'it' : 'them') + '. Restore adds ' + (oldLeft.unsure === 1 ? 'it' : 'them') + ' as new presets' : ''].filter(Boolean).join('; ') +
         '. It is kept unchanged. <button type="button" class="btn small" data-act="old-dl">Download old data</button>' +
-        (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore them</button>' : '') +
+        (oldLeft.unsure ? ' <button type="button" class="btn small" data-act="old-restore">Restore ' + (oldLeft.unsure === 1 ? 'it' : 'all ' + oldLeft.unsure) + '</button>' : '') +
+        (oldLeft.waiting && oldLeft.waiting.length ? '<ul class="old-waiting">' + oldLeft.waiting.map(function (w) {
+          return '<li>' + esc(w.name) + ' <button type="button" class="btn small" data-act="old-restore-one" data-i="' + w.i + '" aria-label="Restore ' + esc(w.name) + '">Restore</button></li>';
+        }).join('') + '</ul>' : '') +
         // Not while old presets still wait to be copied: removing would lose them.
         (notMigrated ? ' (Remove is offered once the waiting presets are copied.)' : ' <button type="button" class="btn small" data-act="old-rm">Remove old data</button>') + '</div>' : '') +
       listHtml(ds) +
@@ -391,19 +410,25 @@
         // Saved in another window since editing began: never overwrite it unasked.
         if (!window.confirm('This preset was changed in another window after you started editing. Save your version over those changes?')) {
           status = 'Not saved. Your changes are still in the editor; the other window\'s version is in the list above.';
-          var st0 = dlg.querySelector('#pe-status'); st0.textContent = status; announce(status); st0.focus();
+          var st0 = dlg.querySelector('#pe-status'); st0.textContent = status; announce(status, true); st0.focus();
           return;
         }
       }
       t.id = editing.origId;
     } else t.id = uniqueId(t.name);
     if (!saveOne(t)) {
-      status = 'Not saved: this browser would not store the preset (its storage may be full). Download it to keep it.';
-      var st = dlg.querySelector('#pe-status'); st.textContent = status; announce(status); st.focus();
+      status = 'Not saved: this browser would not store the preset (its storage may be full). Your changes are still in the editor; "Download draft" keeps them as a file.';
+      var st = dlg.querySelector('#pe-status'); st.textContent = status; announce(status, true); st.focus();
       return;
     }
+    // Another window saved a preset with the same name at the same moment: this one is renamed.
+    var clash = '';
+    if (!memoryOnly && isBroken(KEY + t.id) && /already has the name/.test(broken.filter(function (x) { return x.key === KEY + t.id; })[0].why)) {
+      var was = t.name; t.name = uniqueName(t.name);
+      if (saveOne(t)) clash = ' Another window saved a preset named "' + was + '" at the same moment, so this one is "' + t.name + '".';
+    }
     editing = null;
-    status = memoryOnly ? 'Saved "' + t.name + '" for this visit only: this browser is not saving presets, so download it to keep it.' : 'Saved "' + t.name + '".';
+    status = memoryOnly ? 'Saved "' + t.name + '" for this visit only: this browser is not saving presets, so download it to keep it.' : 'Saved "' + t.name + '".' + clash;
     if (andUse) Alpha.settings.useScheme(t.id); else Alpha.settings.notify();
     render('#pe-status');
   }
@@ -457,8 +482,8 @@
     else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = cut(uniqueName('Copy of ' + p.name), P.MAX_NAME); startEdit(c, null); }
     else if (act === 'download') download(p);
     else if (act === 'old-dl') downloadOld();
-    else if (act === 'old-restore') {
-      var got = restoreOld(); loadMine(); Alpha.settings.notify();
+    else if (act === 'old-restore' || act === 'old-restore-one') {
+      var got = restoreOld(act === 'old-restore-one' ? Number(b.getAttribute('data-i')) : null); loadMine(); Alpha.settings.notify();
       status = got ? 'Restored ' + got + ' preset' + (got === 1 ? '' : 's') + ' from the older version.' : 'Nothing could be restored (this browser\'s storage may be full).';
       render('#pe-status');
     }
@@ -519,6 +544,7 @@
       editing.draft.groups.splice(Number(b.getAttribute('data-i')), 1);
       render('[data-act="add-group"]');
     }
+    else if (act === 'dl-draft') { var dft = P.tidy(editing.draft); dft.id = editing.origId || 'user-draft'; if (!dft.name) dft.name = 'Draft'; download(dft); }
     else if (act === 'save') save(false);
     else if (act === 'save-use') save(true);
     else if (act === 'cancel') { if (!okToDiscard()) return; editing = null; status = ''; render('[data-act="new"]'); }

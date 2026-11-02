@@ -115,7 +115,8 @@
       report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
     }
     lastReport = report;
-    store.set('importReport', report);
+    // A report that cannot be stored must not leave the previous one to come back after a reload.
+    if (!store.set('importReport', report)) store.remove('importReport');
     Alpha.settings.reload();
     Alpha.settings.open(); // rebuild the dialog with the new data and the report
     focusReport();
@@ -150,8 +151,7 @@
     return '<table class="report small"><thead><tr>' + cols.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>' +
       rows.slice(0, SHOWN).map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(r[c[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') +
       '</tbody></table>' +
-      (rows.length > SHOWN ? '<p class="small">Showing the first ' + SHOWN + ' of ' + rows.length + '. ' +
-        '<button type="button" class="btn small" data-act="report-csv">Download the full report (CSV)</button></p>' : '');
+      (rows.length > SHOWN ? '<p class="small">Showing the first ' + SHOWN + ' of ' + rows.length + '; all of them are in the report CSV (button below).</p>' : '');
   }
 
   // Every entry of the last report, one per line: file, kind, line, NDC, text.
@@ -171,6 +171,7 @@
       if (!rep.products.fatal) out.push([rep.productsFile, 'summary', '', '', rep.products.rows + ' rows read, ' + rep.products.imported + ' imported, ' + rep.products.skipped.length + ' skipped']);
       (rep.products.fileNotes || []).forEach(function (n) { out.push([rep.productsFile, 'file note', '', '', n]); });
       if (rep.productsEncoding && rep.productsEncoding.note) out.push([rep.productsFile, 'encoding', '', '', rep.productsEncoding.note]);
+      (rep.products.misfits || []).forEach(function (s) { out.push([rep.productsFile, 'line to fix', s.row, '', s.why + ': ' + s.text]); });
       rep.products.skipped.forEach(function (s) { out.push([rep.productsFile, 'not imported', s.row, s.ndc, s.reason]); });
       rep.products.notes.forEach(function (n) { out.push([rep.productsFile, 'note', n.row, n.ndc, n.note]); });
     }
@@ -204,6 +205,7 @@
     if (rep.products) {
       var p = rep.products, cols = p.columns;
       if (p.problem) h += '<p class="note-bad" data-testid="import-problem">' + esc(rep.productsFile) + ': ' + esc(p.problem) + '</p>';
+      if (p.fatal && p.misfits && p.misfits.length) h += '<h4>Lines to fix</h4>' + table(p.misfits, [['row', 'Line'], ['why', 'Why'], ['text', 'The line']]);
       if (!p.fatal) {
         var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed); // read, but the other file was refused
         h += '<p><strong>' + esc(rep.productsFile) + '</strong>' + (notApplied ? ' (read, not applied)' : '') + ': ' + p.rows + ' rows read, <strong>' +
@@ -226,7 +228,7 @@
       if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       if (r.fatal) {
         var bad = r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; });
-        return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
+        return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p>' + REPORT_BTN + '</div>';
       }
       h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
@@ -237,8 +239,10 @@
       rrows.sort(function (a, b) { return (a.row === '-' ? 1e9 : a.row) - (b.row === '-' ? 1e9 : b.row); });
       h += table(rrows, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Note']]);
     }
-    return h + '<p class="small">' + esc(rep.storedNote) + '</p></div>';
+    return h + '<p class="small">' + esc(rep.storedNote) + '</p>' + REPORT_BTN + '</div>';
   }
+  // The whole report as a CSV file, for any import (long tables show their first rows only).
+  var REPORT_BTN = '<p><button type="button" class="btn small" data-act="report-csv">Download the report (CSV)</button></p>';
 
   function mount(el) {
     var s = saved();

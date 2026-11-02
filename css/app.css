@@ -150,7 +150,7 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
   /* The unit name heads the shelf view here; the pane title stays for screen readers. */
   .pane-elev > .pane-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .grid:not(.has-elev) .pane-map { grid-row: 1 / 3; }
-  .elev { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; align-content: start; }
+  .elev { display: grid; grid-template-columns: minmax(0, 1fr) minmax(min-content, 1fr); grid-template-rows: auto auto 1fr auto; align-content: start; }
   .elev > * { grid-column: 1; }
   .elev > .elev-draw { grid-column: 2; grid-row: 1 / 5; min-height: 0; }
   .elev > .elev-caption { grid-row: 4; border-top: 0; }
