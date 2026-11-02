@@ -69,22 +69,29 @@
     '\u03C7': 'x', '\u03C9': 'w', '\u043F': 'n', '\u0433': 'r', '\u044C': 'b', '\u10BD': 'S',
     // dashes and apostrophes that look like "-" and "'"
     '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2212': '-', '\uFE63': '-', '\uFF0D': '-',
-    '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'"
+    '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'",
+    '\u13A5': 'i', '\u13A9': 'y', '\u2CAD': 'x', '\u2CAC': 'X', '\u2015': '-', '\u2500': '-', '\u30FC': '-', '\u2215': '/', '\u2044': '/',
+    '\u2236': ':', '\u00D7': 'x', '\u3007': 'O'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
   // (fullwidth letters, ligatures such as "\uFB01"), invisible characters
   // dropped (a joiner between two emoji too), look-alike letters mapped,
   // and case ignored.
-  function sameKey(s) {
+  // words: the form for reading words (colour names), without the I/l fold.
+  function sameKey(s, words) {
     // Joiners are dropped everywhere, so a family emoji and the same faces
     // side by side count as the same label: a refusal of two labels that
     // look different is harmless; two that look alike passing is not.
     // Look-alikes are mapped before and after NFKC, which turns some of
     // them (lunate sigma, U+03F9) into letters that look different.
-    var skel = function (x) { return x.replace(/[^\x00-\x7F]/g, function (c) { return SKELETON[c] || c; }); };
+    // Small Cherokee letters (U+AB70-ABBF) look like their capitals, which are mapped.
+    var skel = function (x) { return x.replace(/[^\x00-\x7F]/g, function (c) { var u = c >= 'ꭰ' && c <= 'ꮿ' ? c.toUpperCase() : c; return SKELETON[u] || SKELETON[c] || c; }); };
     // NFD first, so precomposed letters ("Ё", "Ӓ") are mapped by their base letter.
-    return skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
+    // Last, capital I and small l look the same in a sans-serif font ("Lab I",
+    // "Lab l"): both compare as "l" (and so does i, to keep case ignored).
+    var k = skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
+    return words ? k : k.replace(/i/g, 'l');
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
@@ -145,7 +152,7 @@
     return [(h + 360) % 360, s, l];
   }
   function wordMismatch(name, hex) {
-    var words = sameKey(name).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
+    var words = sameKey(name, true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
     // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
     var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
     // Other common colour words, by the standard colour they must look like.
