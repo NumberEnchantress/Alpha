@@ -74,7 +74,10 @@
     '\u2018': "'", '\u2019': "'", '\u02BC': "'", '\u2032': "'", '\uFF07': "'",
     '\u13A5': 'i', '\u13A9': 'y', '\u2CAD': 'x', '\u2CAC': 'X', '\u2015': '-', '\u2500': '-', '\u30FC': '-', '\u2215': '/', '\u2044': '/',
     '\u2236': ':', '\u00D7': 'x', '\u3007': 'O',
-    '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u2D54': 'O','\u222A': 'U', '\u2228': 'V', '\u13CF': 'b'
+    '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u2D54': 'O','\u222A': 'U', '\u2228': 'V', '\u13CF': 'b',
+    // Arabic-Indic and Devanagari digits that look like Latin letters or digits; more letters and symbols
+    '\u0661': 'l', '\u06F1': 'l', '\u0665': 'o', '\u06F5': 'o', '\u0667': 'V', '\u06F7': 'V', '\u06F0': 'o', '\u0660': 'o', '\u0966': 'o',
+    '\u042C': 'b', '\u0461': 'w', '\u2043': '-', '\u29F8': '/', '\u04BD': 'e', '\u01B7': '3', '\u2010': '-', '\u2011': '-'
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -158,7 +161,8 @@
     return [(h + 360) % 360, s, l];
   }
   function wordMismatch(name, hex) {
-    var words = sameKey(name, true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
+    // "DarkRed", "LightBlue": words joined in one are split at their capitals.
+    var words = sameKey(String(name).replace(/([a-z])([A-Z])/g, '$1 $2'), true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
     // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
     var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
     // Other common colour words, by the standard colour they must look like.
