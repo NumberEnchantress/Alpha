@@ -52,21 +52,12 @@
   }
   function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
-  /* Version-14 to 16 kept all presets in one list under "alpha.presets".
-     Each entry is MOVED: copied to its own entry, then taken out of the old
-     list. So an entry is moved once at most, and a preset deleted later has
-     nothing to come back from. An entry that does not fit (full storage)
-     stays in the old list and is tried again on the next load; nothing else
-     is retried. An entry already stored with exactly the same contents
-     counts as moved (a move whose second step did not happen). Missing, bad,
-     repeated or taken ids get a new id.
-     Versions 17-21 ("alpha.presets-migrated") and 22-23
-     ("alpha.presets-migrated-2") copied entries and left the old list as it
-     was; which entries each one copied differs. With either flag set,
-     nothing is copied unasked: an exact copy counts as moved, and every
-     other entry (deleted or changed since, or never copied) is kept and
-     shown with "Restore them". Entries that are not presets, an old list
-     that cannot be read, and the version-16 backup are shown too. */
+  /* The old one-list format ("alpha.presets", versions 14-16). On a first
+     move each entry is copied to its own entry and taken out of the list, so
+     it moves once; one that does not fit waits and is retried. Once any
+     version has moved or copied the list (its flag, or presets stored per
+     entry), nothing is copied unasked: an exact copy counts as moved, and the
+     rest is listed with Restore. See NOTES.md, Decisions, for the history. */
   var notMigrated = 0, oldLeft = null;
   function freeId(name, used) {
     var base = 'user-' + P.slug(typeof name === 'string' ? name : 'old preset'), id = base, n = 2;
@@ -89,13 +80,7 @@
   function migrateOldList() {
     notMigrated = 0; oldLeft = null;
     var o = oldList(), backup = store.raw('presets-unreadable');
-    // Versions 17-21 wrote "presets-migrated", versions 22-23 "presets-migrated-2"
-    // after copying the list (and left it in place). Either means an older
-    // version copied it already: nothing is copied again unasked.
-    // Also counted as "ran before" (version-28): this version's own marker,
-    // set after it moves a list, and any preset already stored one per entry.
-    // An old list seen then was written again by an older version still open
-    // in another tab (its stale copy), so a preset deleted here would come back.
+    // A list seen after a move was written again by an older version in another tab.
     var ranBefore = store.raw('presets-migrated') != null || store.raw('presets-migrated-2') != null ||
       store.raw('presets-moved') != null || store.keys(KEY).length > 0, notPresets = 0, unsure = 0, waiting = [], stillWaiting = [];
     var waitRoom = []; // entries this version could not copy for lack of room (by contents)
@@ -121,10 +106,10 @@
       // This version moved (part of) the list: say so, and remember the
       // entries still waiting for room, the only ones tried again unasked.
       if (!ranBefore || waitRoom.length) {
-        // Also the flags versions 17-27 check, so an older version opened later does not move it again.
-        store.setRaw('presets-moved', '1'); store.setRaw('presets-migrated', '1'); store.setRaw('presets-migrated-2', '1');
         if (stillWaiting.length) store.setRaw('presets-waiting', JSON.stringify(stillWaiting)); else store.remove('presets-waiting');
       }
+      // The flags versions 17-28 check, set whenever an old list is seen, so they leave it alone.
+      ['presets-moved', 'presets-migrated', 'presets-migrated-2'].forEach(function (f) { if (store.raw(f) == null) store.setRaw(f, '1'); });
     }
     if ((o.raw != null && !o.list) || notPresets || unsure || backup != null) {
       oldLeft = { unreadableList: o.raw != null && !o.list, notPresets: notPresets, unsure: unsure, waiting: waiting, backup: backup != null };
@@ -147,9 +132,8 @@
       return out;
     };
   }
-  // A short key for an old entry's contents: each Restore button names its
-  // entry by this, not by its place in the list, which an older version open
-  // in another tab can change at any time (version-28 restored the wrong one).
+  // A short key for an old entry's contents: Restore buttons name entries by
+  // it, not by their place in a list another tab can rewrite.
   function entryKey(p) {
     var s = contentKey(p), h1 = 5381, h2 = 52711;
     for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
@@ -535,8 +519,12 @@
       p.name = uniqueName(p.name);
       p.id = uniqueId(p.name);
       if (!saveOne(p)) { status = f.name + ' was read but not saved: this browser would not store it (its storage may be full).'; render('#pe-status'); return; }
+      // Another window loading the same file at the same moment: this one is renamed (as for Save).
+      mySaves[p.id] = 1;
+      var renamedL = renameClashes();
+      if (renamedL.length) { var nowP = find(Alpha.state.ds, p.id); if (nowP) p.name = nowP.name; }
       Alpha.settings.notify();
-      status = 'Loaded "' + p.name + '" from ' + f.name + '.' + (res.warnings.length ? ' Note: ' + res.warnings.join(', ') + '.' : '');
+      status = 'Loaded "' + p.name + '" from ' + f.name + '.' + (res.warnings.length ? ' Note: ' + res.warnings.join(', ') + '.' : '') + (renamedL.length ? ' ' + renamedL.join(' ') : '');
       render('#pe-status');
     };
     r.onerror = function () { status = 'Could not read ' + f.name + '.'; render('#pe-status'); };

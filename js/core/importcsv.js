@@ -149,10 +149,12 @@
   // first 30 lines (then the one with more fields): a tab file whose header
   // also holds commas, or a semicolon file with "1,000" in it, reads right.
   function delimiterOf(t) {
-    var ls = t.split(/\r\n|\r|\n/).filter(function (s) { return s.trim(); }).slice(0, 40).map(function (s) { return s.replace(/"[^"]*"/g, ''); });
-    // A title line or two above the header: count from the first line that names an NDC column.
+    var raw = t.split(/\r\n|\r|\n/).filter(function (s) { return s.trim(); }).slice(0, 40);
+    var ls = raw.map(function (s) { return s.replace(/"[^"]*"/g, ''); });
+    // A title line or two above the header: count from the first line that names
+    // an NDC column (looked for in the line as written: the header may be quoted).
     var hi = -1;
-    for (var j = 0; j < Math.min(10, ls.length) && hi < 0; j++) if (/\bndc\b/i.test(ls[j])) hi = j;
+    for (var j = 0; j < Math.min(10, raw.length) && hi < 0; j++) if (/\bndc\b/i.test(raw[j])) hi = j;
     if (hi > 0) ls = ls.slice(hi);
     var best = ',', bestScore = -1;
     [',', ';', '\t'].forEach(function (c) {
@@ -166,17 +168,9 @@
     return best;
   }
 
-  /* The whole file is read in one pass by PapaParse, which follows the CSV
-     standard (RFC 4180): a quoted field may hold commas, quotes and line
-     breaks, as Excel writes them (Alt+Enter). Damaged quoting is never
-     guessed around: when a quote problem is found, reading stops, `problem`
-     names the line, and the caller imports nothing from the file, because
-     after a broken quote it cannot be known where the following rows begin.
-     A quote problem is either one PapaParse reports, or a quoted field with
-     line breaks that does not fit: its record has a different number of
-     fields from the first row, or a later line inside it holds an NDC (so
-     other rows were swallowed), or the file has one column (robot lists).
-     Every record comes back with the line it starts on and ends on. */
+  /* The file is read in one pass by PapaParse (RFC 4180), after the quote
+     check below. Any quote problem, and any value over several lines,
+     refuses the file; every record comes back with its line. */
   /* Quote marks must follow the CSV standard exactly: a quoted value starts
      with the quote (no space before it), a quote inside it is doubled, and
      the closing quote is followed by the delimiter or the end of the line. A
@@ -404,8 +398,12 @@
     rows.forEach(function (r) { freq[r.count] = (freq[r.count] || 0) + 1; });
     Object.keys(freq).forEach(function (c) { if (freq[c] > (freq[mode] || 0)) mode = Number(c); });
     if (mode === width || freq[mode] * 2 <= rows.length) return null;
+    // More fields than the header: a comma at the end of each line if the extra
+    // fields are empty everywhere, else an unquoted comma inside a value.
+    var trailing = rows.filter(function (r) { return r.count === mode; }).every(function (r) { return r.cells.slice(width).every(blankCell); });
     return 'Most rows (' + freq[mode] + ' of ' + rows.length + ', lines ' + rows[0].line + '-' + rows[rows.length - 1].line + ') have ' + mode + ' fields, but the header has ' + width + ', so it cannot be known which values belong to which column. ' +
-      (mode > width ? 'Usually each line ends with a comma and the header does not: add ' + (mode - width) + ' comma' + (mode - width > 1 ? 's' : '') + ' to the end of the header line, or remove the trailing commas from the rows.'
+      (mode > width && trailing ? 'Usually each line ends with a comma and the header does not: add ' + (mode - width) + ' comma' + (mode - width > 1 ? 's' : '') + ' to the end of the header line, or remove the trailing commas from the rows.'
+        : mode > width ? 'A value with a comma in it is probably not in quotes on those rows (such as Teva, Inc.): put such values in quotes ("Teva, Inc."), for example by saving the file again from a spreadsheet as CSV.'
         : 'The header may end with a comma the rows do not have, or the rows may leave off empty values at the end: make the header and the rows match.') +
       ' Nothing was imported; fix the file and import again.';
   }
@@ -469,29 +467,13 @@
         cols.unused.push(m.unit); delete m.unit;
       }
     }
-    // (Version-30 stopped using a unit column none of whose values named a unit
-    // of its row's location; that turned a conflict, such as FM-N given for
-    // 071, into a known shelf. Removed in version-31: a value that does not
-    // name a unit of its location leaves the unit, and so the shelf, unknown.)
     if (p.sepLine) report.fileNotes.push('Line 1 ("sep=") tells Excel the delimiter; it was skipped.');
     if (p.titleLines && p.titleLines.length) report.fileNotes.push('Line' + (p.titleLines.length > 1 ? 's ' : ' ') + p.titleLines.join(', ') + ' above the header (a title) ' + (p.titleLines.length > 1 ? 'were' : 'was') + ' skipped.');
-    // A total line is skipped and listed, whatever its field count, but only
-    // in its exact form: its first value is "Total", "Subtotal", "Grand total"
-    // or "Total items" (with ":" and a number at most), and every other value
-    // is a number. "Total 2 bottles max" is not one (it can be the tail of a
-    // row split by a line break, whose cut value would then import).
-    // (Version-30 also dropped a comma at the end of every row; with an
-    // unquoted comma inside a value on every row that shifted a whole file.
-    // Removed in version-31: such files are refused, with what to fix.)
-    var TOTAL = /^(grand\s+|sub-?)?totals?(\s+(items?|products?|rows?|lines?|count|qty|quantity))?\s*[:=]?\s*[\d.,]*$/i, totalSet = {};
-    p.rows.forEach(function (r) {
-      var vals = r.cells.map(function (c) { return String(c == null ? '' : c).trim(); }).filter(Boolean);
-      if (vals.length && TOTAL.test(vals[0]) && vals.slice(1).every(function (v) { return /^[\d.,$]+$/.test(v); })) totalSet[r.line] = 1;
-    });
+    // Total lines and trailing commas are not read around; see NOTES (Decisions).
     // A first column with no name holding 0, 1, 2 ... (or 1, 2, 3 ...) on every
-    // row (total lines aside) is the row numbers some programs write (pandas): ignored.
+    // row is the row numbers some programs write (pandas): ignored.
     if (p.fields.length > 1 && !p.fields[0] && p.rows.length) {
-      var numbered = p.rows.filter(function (r) { return !totalSet[r.line]; });
+      var numbered = p.rows;
       var base = numbered.length && String(numbered[0].cells[0]).trim() === '1' ? 1 : 0;
       if (numbered.length && numbered.every(function (r, ri) { return String(r.cells[0]).trim() === String(ri + base); })) {
         p.fields[0] = '(row numbers)';
@@ -509,8 +491,16 @@
     // fields: an extra comma plus an empty last column looks exactly like a
     // trailing comma.
     var width = p.fields.length;
-    var shape = shapeProblem(p.rows.filter(function (r) { return !totalSet[r.line]; }), width);
-    if (shape) return stop(shape);
+    var shape = shapeProblem(p.rows, width);
+    if (shape) {
+      // the rows with another count are the lines to fix
+      report.rows = 0;
+      report.misfits = p.rows.filter(function (r) { return r.count !== width; }).map(function (r) {
+        var text = r.cells.map(function (c) { return String(c == null ? '' : c); }).join(p.delimiter || ',');
+        return { row: r.line, why: r.count + ' field' + (r.count > 1 ? 's' : '') + '; the header has ' + width, text: text.length > 300 ? text.slice(0, 299) + '…' : text };
+      });
+      return stop(shape);
+    }
     // A line as written (cut at 300 characters), and a short list of line numbers.
     function lineText(r) {
       var text = r.cells.map(function (c) { return String(c == null ? '' : c); }).join(p.delimiter || ',');
@@ -520,7 +510,7 @@
       return list.slice(0, 8).map(function (r) { return r.line; }).join(', ') + (list.length > 8 ? ' and ' + (list.length - 8) + ' more (all in "Lines to fix" and in the report CSV)' : '');
     }
     var misfits = p.rows.filter(function (r) {
-      return !totalSet[r.line] && (r.count !== width || !p.fields.every(function (f, i) { return f || blankCell(r.cells[i]); }));
+      return r.count !== width || !p.fields.every(function (f, i) { return f || blankCell(r.cells[i]); });
     });
     // Text in the NDC column that is not an NDC (and not a placeholder such
     // as "N/A") is what a split or shifted row leaves there, so it refuses the
@@ -536,7 +526,7 @@
     var odd = [];
     for (var hi = 0; hi < p.rows.length; hi++) {
       var hr = p.rows[hi];
-      if (misfitSet[hr.line] || totalSet[hr.line]) continue;
+      if (misfitSet[hr.line]) continue;
       var hv = ndcText(String(hr.data[m.ndc] == null ? '' : hr.data[m.ndc]).trim()).value;
       if (repeatHeader(hr)) {
         if (hr.cells.map(key).join(',') !== headKeys) {
@@ -609,7 +599,6 @@
       };
       var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
-      if (totalSet[line]) { report.skipped.push({ row: line, ndc: '', reason: 'a total line, not a product' }); return; }
       if (repeatHeader(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
       var sp = splitAt(row);
       if (sp > 0) {
@@ -667,9 +656,18 @@
       if (rawLoc) {
         loc = findLocation(rawLoc, layout);
         // A unit code in the Location column ("FM-N"): its location and unit.
+        // The exact id first (letter case aside); else one id that matches with
+        // punctuation aside ("FMN" for FM-N). Two such matches ("FM12" for FM-12
+        // and FM-1-2) leave it unknown.
         if (!loc) {
-          layout.locations.forEach(function (lc) { lc.units.forEach(function (u) { if (!unitInLoc && key(u.id) === key(rawLoc)) { unitInLoc = u; loc = lc; } }); });
-          if (unitInLoc) { prod.location = loc.code; note('location "' + rawLoc + '" read as ' + loc.code + ', unit ' + unitInLoc.id); }
+          var exact = [], loose = [];
+          layout.locations.forEach(function (lc) { lc.units.forEach(function (u) {
+            if (String(u.id).toUpperCase() === rawLoc.toUpperCase()) exact.push([u, lc]);
+            else if (key(u.id) === key(rawLoc)) loose.push([u, lc]);
+          }); });
+          var pick = exact.length === 1 ? exact[0] : !exact.length && loose.length === 1 ? loose[0] : null;
+          if (pick) { unitInLoc = pick[0]; loc = pick[1]; prod.location = loc.code; note('location "' + rawLoc + '" read as ' + loc.code + ', unit ' + unitInLoc.id); }
+          else if (exact.length + loose.length > 1) note('location "' + rawLoc + '" could be unit ' + exact.concat(loose).map(function (x) { return x[0].id; }).join(' or ') + '; location and unit left unknown');
         }
         if (unitInLoc) { /* done above */ } else if (loc) {
           prod.location = loc.code;
