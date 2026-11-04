@@ -199,6 +199,18 @@
     });
     $('help-btn').addEventListener('click', function () { $('help').showModal(); });
     $('help').addEventListener('close', function () { q.focus(); });
+    // Turning a phone upright after the page scrolled to the shelf (wider
+    // layouts do) could leave the search box above the screen: bring its
+    // label back into view when the layout becomes one column.
+    var narrow = window.matchMedia ? window.matchMedia('(max-width: 760px)') : null;
+    if (narrow) {
+      var toNarrow = function () {
+        if (!narrow.matches) return;
+        var label = document.querySelector('.search-label') || q;
+        requestAnimationFrame(function () { if (label.getBoundingClientRect().top < 0) label.scrollIntoView({ block: 'start' }); });
+      };
+      if (narrow.addEventListener) narrow.addEventListener('change', toNarrow); else if (narrow.addListener) narrow.addListener(toNarrow);
+    }
     Alpha.settings.init({ onChange: function () { refresh(); }, reload: function () { loadData(); runSearch(); } });
     runSearch();
     q.focus();

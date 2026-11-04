@@ -96,6 +96,7 @@
     if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). ' +
       (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (the storage is full, or 20 earlier copies are already kept), so they are left as they are and changes are not saved.') + ' Check Settings.';
     if (notice) return notice;
+    if (usable && !saved) return 'A change to the settings could not be saved (this browser\'s storage may be full). It lasts until the page is closed.';
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
   }
@@ -124,7 +125,7 @@
     var ds = Alpha.state.ds, S = Alpha.state, cur = scheme(ds);
     var h = '<h2 id="settings-title">Settings</h2>';
     if (!usable) h += '<p class="note-bad">This browser is not letting Alpha save settings. They will last until the page is closed.</p>';
-    else if (!saved) h += '<p class="note-bad">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
+    else if (!saved) h += '<p class="note-bad" role="alert">The last change to the settings could not be saved (this browser\'s storage may be full). It will last until the page is closed.</p>';
     if (unreadable) h += '<p class="note-bad">The settings saved on this computer could not be read, so the defaults are in use. ' +
       (backupKey ? 'A copy of them was kept in this browser as alpha.' + esc(backupKey) + '; the next change you make here replaces the unreadable settings.'
         : 'No copy could be kept (the storage in this browser is full, or 20 earlier copies are already kept), so they are left as they are and changes made here are not saved. ' +
@@ -205,7 +206,7 @@
   function changed() { applyScale(); if (hooks.onChange) hooks.onChange(); }
 
   function onDialogEvent(e) {
-    var t = e.target;
+    var t = e.target, wasSaved = saved;
     if (t.name === 'scheme') { prefs.scheme = t.value; save(); changed(); }
     else if (t.name === 'scale') { prefs.scale = t.value; save(); changed(); }
     else if (t.hasAttribute && t.hasAttribute('data-rule')) {
@@ -213,6 +214,10 @@
       if (t.checked) delete prefs.disabled[id]; else prefs.disabled[id] = true;
       save(); changed();
     }
+    else return;
+    // A change that could not be saved (or saved again after a failure) is
+    // shown at once, not only when Settings is next opened.
+    if (!saved || !wasSaved) rebuildKeepingFocus();
   }
   // The kept copies of unreadable settings (alpha.prefs-unreadable, -2 ... -20).
   function copyKeys() { return store.keys('prefs-unreadable').filter(function (k) { return /^prefs-unreadable(-\d+)?$/.test(k); }); }

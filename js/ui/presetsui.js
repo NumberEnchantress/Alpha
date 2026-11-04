@@ -198,6 +198,7 @@
     return ok;
   }
   function removeOne(id) {
+    delete justSaved[id]; // deleted here: another window's later save of it is not "over yours"
     if (memoryOnly) { mine = mine.filter(function (x) { return x.id !== id; }); return true; }
     store.remove(KEY + id);
     var gone = store.raw(KEY + id) == null;
@@ -303,7 +304,7 @@
     }).join('') + '<option value="' + OWN + '"' + (own ? ' selected' : '') + '>Type your own…</option>';
     return '<select id="pl-' + i + '" data-i="' + i + '" data-f="label" aria-label="Group ' + (i + 1) + ' label" title="' + esc(g.label) + '">' + opts + '</select>' +
       '<input type="text" id="po-' + i + '" data-i="' + i + '" data-f="own" class="own-label" aria-label="Group ' + (i + 1) + ' label, typed"' +
-      ' maxlength="' + P.MAX_LABEL + '" value="' + esc(own ? g.label : '') + '"' + (own ? '' : ' hidden') + ' placeholder="Label">';
+      ' data-max="' + P.MAX_LABEL + '" value="' + esc(own ? g.label : '') + '"' + (own ? '' : ' hidden') + ' placeholder="Label">';
   }
 
   function basketCell(i, b, value, colours) {
@@ -320,7 +321,7 @@
   function editorHtml(ds) {
     var d = editing.draft, choices = labelChoices(ds), colours = colourChoices(d);
     return '<fieldset class="preset-editor"><legend>' + (editing.origId ? 'Edit preset' : 'New preset') + '</legend>' +
-      '<label>Name <input type="text" id="pe-name" maxlength="' + P.MAX_NAME + '" value="' + esc(d.name) + '" placeholder="e.g. Our 9 baskets"></label>' +
+      '<label>Name <input type="text" id="pe-name" data-max="' + P.MAX_NAME + '" value="' + esc(d.name) + '" placeholder="e.g. Our 9 baskets"></label>' +
       '<table class="pe-table"><thead><tr><th>#</th><th>Group label</th><th>Basket 1</th><th>Basket 2</th><th><span class="sr">Remove</span></th></tr></thead><tbody>' +
       d.groups.map(function (g, i) {
         return '<tr><td>' + (i + 1) + '</td><td>' + labelCell(i, g, choices) + '</td><td>' + basketCell(i, 0, g.baskets[0], colours) + '</td>' +
@@ -641,6 +642,11 @@
     var t = e.target;
     if (t.id === 'pe-file') { loadFile(t); return; }
     if (!editing) return;
+    // Too long: cut between characters as seen on screen (the browser's maxlength
+    // could leave half an emoji or a Hindi letter without its vowel). Not while
+    // a word is still being composed with an input method.
+    var max = Number(t.getAttribute('data-max'));
+    if (max && t.value.length > max && !e.isComposing) t.value = cut(t.value, max);
     if (t.id === 'pe-name') { editing.draft.name = t.value; showErrors(); return; }
     var i = Number(t.getAttribute('data-i')), f = t.getAttribute('data-f');
     if (isNaN(i) || !f) return;
@@ -674,6 +680,7 @@
     dlg.addEventListener('click', onClick);
     dlg.addEventListener('change', onInput);
     dlg.addEventListener('input', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') onInput(e); });
+    dlg.addEventListener('compositionend', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') onInput(e); });
     // Esc with unsaved changes asks first. It is handled on the key press,
     // because Chromium stops honouring a prevented "cancel" after the first
     // one; if the dialog is closed anyway, it reopens with the draft.
