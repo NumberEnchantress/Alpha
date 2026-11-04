@@ -86,7 +86,7 @@
       for (var i = 0; i < hits.length; i++) {
         var h = hits[i], p = byNdc[h.id];
         // Match quality: 0 per exact word, 1 per prefix, 1 + edit distance per typo match.
-        var tier = 0;
+        var tier = 0, typo = false;
         for (var j = 0; j < qterms.length; j++) {
           var qt = qterms[j];
           if (h.terms.indexOf(qt) >= 0) continue;
@@ -96,8 +96,11 @@
             best = Math.min(best, t.indexOf(qt) === 0 ? 1 : 1 + distance(qt, t.slice(0, qt.length + 2)));
           }
           tier += best;
+          if (best > 1) typo = true;
         }
-        out.push({ product: p, tier: tier, o: order[p.ndc] });
+        // typo: found only by a different spelling. It may be another drug
+        // ("hydralazine" finds hydroxyzine), so it is never chosen unasked.
+        out.push({ product: p, tier: tier, o: order[p.ndc], typo: typo });
       }
       return out;
     }

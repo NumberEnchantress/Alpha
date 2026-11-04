@@ -122,6 +122,11 @@
     // The allowed symbols with emoji twins (check mark, bullet, arrows: \u2713 and
     // \u2714, \u2191 and \u2B06, \u2022 and \u25AA) count as that same mark too.
     if (!words) k = k.replace(EMOJI, '\uE000').replace(/[\u2713\u2022\u2190-\u2193]/g, '\uE000');
+    // Version-39: every accent mark is dropped ("\u0117" and "\u00E9", "\u00FC" and
+    // "\u016B" differ by 2 or 3 pixels at label size), and letters with a stroke
+    // or joined letters compare as their plain letters ("\u0142" as l, "\u0153" as oe).
+    if (!words) k = k.normalize('NFD').replace(/\p{M}/gu, '').replace(/[\u0142\u0141]/g, 'l').replace(/[\u0111\u0110]/g, 'd').replace(/[\u0127\u0126]/g, 'h')
+      .replace(/[\u0167\u0166]/g, 't').replace(/[\u00F8\u00D8]/g, 'o').replace(/[\u0153\u0152]/g, 'oe').replace(/[\u00E6\u00C6]/g, 'ae').replace(/\u00DF/g, 'ss').toLowerCase();
     // A run of dashes looks like one long dash ("A--B", "A\u2014B").
     return words ? k : k.replace(/-+/g, '-').replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
   }
