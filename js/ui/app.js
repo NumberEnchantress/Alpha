@@ -138,7 +138,7 @@
   // click on a result is a choice: then the shelf and its caption are shown.
   function showShelf() {
     if (!window.matchMedia || !window.matchMedia('(max-width: 760px)').matches) return;
-    requestAnimationFrame(function () {
+    var go = function () {
       var el = $('elev'), g = el.querySelector('.shelf-hi, .shelf-est'), cap = el.querySelector('.elev-caption');
       if (!g) { el.scrollIntoView({ block: 'start' }); return; }
       var a = g.getBoundingClientRect(), c = cap ? cap.getBoundingClientRect() : a;
@@ -146,7 +146,9 @@
       // both in view if they fit, else the shelf at the top
       var dy = bottom - top <= window.innerHeight - 12 ? (bottom > window.innerHeight ? bottom - window.innerHeight + 6 : top < 0 ? top - 6 : 0) : a.top - 6;
       if (dy) window.scrollBy(0, dy);
-    });
+    };
+    // Again a moment later: the results list and the caption can still move the page.
+    requestAnimationFrame(go); setTimeout(go, 200);
   }
   function onInputKey(e) {
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }

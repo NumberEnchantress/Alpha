@@ -85,7 +85,7 @@
     '\u2758': '|', '\u01C1': '|', '\uFFE8': '|', '\u4E00': '-', '\u2501': '-', '\u2574': '-', '\u2576': '-', '\u23AF': '-', '\u2E3A': '-', '\u201A': ',', '\u060C': ',',
     // allowed characters that look like others; emoji shaped like ASCII signs
     '\u00D0': '\u0110', '\u201C': '"', '\u201D': '"', '\u201E': '"', '\u2026': '...', '\u2795': '+', '\u2796': '-', '\u2797': '/', '\u274C': 'x', '\u2716': 'x',
-    '\u2B55': 'o', '\u2757': '!', '\u2755': '!', '\u2753': '?', '\u2754': '?', '\u203C': '!!', '\u2049': '!?', '\u00B4': "'"
+    '\u0218': '\u015E', '\u0219': '\u015F', '\u021A': '\u0162', '\u021B': '\u0163', '\u2B55': 'o', '\u2757': '!', '\u2755': '!', '\u2753': '?', '\u2754': '?', '\u203C': '!!', '\u2049': '!?', '\u00B4': "'"
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -104,11 +104,18 @@
     // NFD first, so precomposed letters ("Ё", "Ӓ") are mapped by their base letter.
     // Last, capital I and small l look the same in a sans-serif font ("Lab I",
     // "Lab l"): both compare as "l" (and so does i, to keep case ignored).
-    var k = skel(skel(clean(s).normalize('NFD')).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
+    // Carons on d, l, t and L draw like an apostrophe after the letter; a breve
+    // and a caron, and a diaeresis and a double acute, differ by a few pixels.
+    var d = clean(s).normalize('NFD').replace(/([dltL])\u030C/g, "$1'").replace(/\u030C/g, '\u0306').replace(/\u030B/g, '\u0308');
+    var k = skel(skel(d).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
     // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
     // (So "Mail" and "Mall" count as the same label: a refusal of two labels that
     // look different is harmless, two that look alike passing is not.)
     // So are "cl" and "d", a backquote and an apostrophe, and two apostrophes and a quote.
+    // Every emoji or pictograph left counts as the same mark (U+E000, which
+    // typed text cannot hold): many look alike, and one the computer's font
+    // lacks draws as the same box as any other.
+    if (!words) k = k.replace(EMOJI, '\uE000');
     return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
   }
   // Text with nothing but accent marks shows as nothing.
@@ -128,22 +135,24 @@
   // Also refused: any format character, unassigned or private-use code point,
   // and control code other than spacing (a joiner inside an emoji is fine).
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
-  function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E').replace(JOINING, '$1'); return INVISIBLE.test(t) || HIDDEN.test(t); }
+  // (Unassigned and private-use code points first: followed by U+FE0F they
+  // would pass as an emoji, and any two draw as the same empty box.)
+  function invisible(s) { if (!isStr(s)) return false; if (/[\p{Cn}\p{Co}]/u.test(s)) return true; var t = s.replace(EMOJI, 'E').replace(JOINING, '$1'); return INVISIBLE.test(t) || HIDDEN.test(t); }
   // What is wrong with a piece of text that looks fine, or null.
   // Characters typed text may have (an allow-list; after many look-alikes
   // from other alphabets and symbol blocks were found, version-36 stopped
   // trying to list the bad ones): printable ASCII, Latin letters with accents
   // (Latin-1 and Latin Extended-A, less the dotless i, kra, middle-dot L,
   // n-apostrophe and long s, which look like other letters), the micro sign,
-  // degree, plus-minus, (c), (R), TM, dashes, curly quotes and the ellipsis.
-  // Emoji shown in colour are allowed too.
-  var ALLOWED = /^[\x20-\x7E\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u0130\u0132-\u0137\u0139-\u013E\u0141-\u0148\u014A-\u017E\u00B5\u00B0\u00B1\u00A9\u00AE\u2122\u2013\u2014\u2018\u2019\u201C\u201D\u2026]$/;
-  // An emoji sequence shown in colour: emoji style by default, or made so
-  // (U+FE0F, a keycap, a skin tone, a joiner, a tag flag).
-  function colourful(m) { return /[\uFE0F\u20E3\u200D\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]/u.test(m) || /^\p{Emoji_Presentation}/u.test(m); }
+  // degree, plus-minus, (c), (R), TM, dashes, curly quotes, the ellipsis,
+  // fractions, <= >=, arrows, a check mark, a bullet, Rx, No., the times sign;
+  // Vietnamese letters and Romanian s and t with a comma (version-37).
+  // Emoji are allowed too: when labels are compared, every emoji counts as
+  // the same mark, so two labels that differ only in emoji clash.
+  var ALLOWED = /^[\x20-\x7E\u00C0-\u00FF\u0100-\u0130\u0132-\u0137\u0139-\u013E\u0141-\u0148\u014A-\u017E\u01A0\u01A1\u01AF\u01B0\u0218-\u021B\u1EA0-\u1EF9\u00BC-\u00BE\u00B5\u00B0\u00B1\u00A9\u00AE\u2122\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u2022\u2190-\u2193\u2264\u2265\u2713\u211E\u2116]$/;
   // The first character not allowed, or null.
   function notAllowed(s) {
-    var rest = clean(s).replace(EMOJI, function (m) { return colourful(m) ? '' : m; });
+    var rest = clean(s).replace(EMOJI, '');
     for (var ch of rest) if (!ALLOWED.test(ch)) return ch;
     return null;
   }
@@ -176,28 +185,6 @@
     var n = name.toLowerCase().replace(/^gray$/, 'grey');
     return COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0] || null;
   }
-  // Whether a hex looks like the standard colour id w: the same hue family for
-  // colours, dark for black, light for white, unsaturated for grey. Hue ranges
-  // in degrees; pink also covers light reds (#ffc0cb), red only the darker ones.
-  var FAMILY = { red: [340, 20], orange: [15, 45], yellow: [40, 70], green: [70, 170], blue: [170, 255], purple: [255, 320], pink: [280, 20] };
-  function hsl(hex) {
-    var c = rgb(hex).map(function (v) { return v / 255; }), max = Math.max.apply(null, c), min = Math.min.apply(null, c), l = (max + min) / 2, d = max - min, h = 0;
-    var s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-    if (d) h = max === c[0] ? 60 * (((c[1] - c[2]) / d) % 6) : max === c[1] ? 60 * ((c[2] - c[0]) / d + 2) : 60 * ((c[0] - c[1]) / d + 4);
-    return [(h + 360) % 360, s, l];
-  }
-  function looksLike(w, hex) {
-    var v = hsl(hex), h = v[0], s = v[1], l = v[2];
-    if (w === 'black') return l <= 0.3;
-    if (w === 'white') return l >= 0.8 && s <= 0.5;
-    if (w === 'grey') return s <= 0.25 && l > 0.1 && l < 0.9;
-    var fr = FAMILY[w];
-    if (s < 0.2 || l < 0.08 || l > 0.95) return false; // too grey, dark or light to be a colour
-    if (w === 'red' && l > 0.7) return false;  // that light, it is pink
-    if (w === 'pink' && (h >= 340 || h < 20) && l < 0.55) return false; // that dark a red is not pink
-    return fr[0] < fr[1] ? h >= fr[0] && h < fr[1] : h >= fr[0] || h < fr[1];
-  }
-
   // Problems with a preset, as plain sentences. Empty list = valid.
   // opts.stored: a preset already stored (by this or an older version). Only
   // its shape is checked, and duplicates by plain letters: the rules about
@@ -231,8 +218,8 @@
       // "Navy blue" or "darkred", never covered them all). Stored presets keep
       // their colours; the editor flags them.
       var std = standard(name);
-      if (!stored && !std) errors.push('The colour "' + name + '" is not one of the colours presets can use (' + COLOUR_CHOICES.map(function (x) { return x.name; }).join(', ') + '), so it cannot be known to look like its name.');
-      else if (!stored && !looksLike(std.id, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + std.name.toLowerCase() + ' (' + std.hex + ').');
+      if (!stored && std && String(c.hex).toLowerCase() !== std.hex) errors.push('The colour "' + name + '" is ' + c.hex + ', but presets use ' + std.hex + ' for ' + std.name.toLowerCase() + ' (the standard colours are fixed, so each looks like its name).');
+      else if (!stored && !std) errors.push('The colour "' + name + '" is not one of the colours presets can use (' + COLOUR_CHOICES.map(function (x) { return x.name; }).join(', ') + '), so it cannot be known to look like its name.');
       // Two colours that look alike, or share a name, cannot tell groups apart.
       if (names[K(name)]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];
@@ -244,7 +231,7 @@
     var groups = p.groups;
     if (groups.length < MIN_GROUPS) errors.push('A preset needs at least ' + MIN_GROUPS + ' groups (it has ' + groups.length + ').');
     if (groups.length > MAX_GROUPS) { errors.push('A preset can have at most ' + MAX_GROUPS + ' groups (it has ' + groups.length + ').'); return errors; }
-    var labels = map(), combos = map();
+    var labels = map(), labelText = map(), combos = map();
     groups.forEach(function (g, i) {
       var n = 'Group ' + (i + 1);
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
@@ -252,8 +239,12 @@
       if (tp(g.label)) errors.push(n + ': the label ' + tp(g.label) + '.');
       else if (!isStr(g.label) || blank(g.label)) errors.push(n + ' needs a label.');
       else if (label.length > MAX_LABEL) errors.push(n + ': the label is longer than ' + MAX_LABEL + ' characters.');
-      else if (labels[K(label)]) errors.push(n + ': the label "' + label + '" is already used by group ' + labels[K(label)] + '.');
-      else labels[K(label)] = i + 1;
+      else if (labels[K(label)]) {
+        var was = labelText[K(label)];
+        errors.push(n + ': the label "' + label + '" ' + (was.toLowerCase() === label.toLowerCase() ? 'is already used by group ' + labels[K(label)] + '.'
+          : 'looks too much like "' + was + '" (group ' + labels[K(label)] + '). Labels must differ in letters or digits that cannot be mistaken (not only in emoji, accents such as ě/ĕ, or look-alikes such as I and l, O and 0).'));
+      }
+      else { labels[K(label)] = i + 1; labelText[K(label)] = label; }
       var b = g.baskets;
       if (!Array.isArray(b) || !b.every(isStr)) { errors.push(n + ': baskets must be a list of colour ids.'); return; }
       if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
