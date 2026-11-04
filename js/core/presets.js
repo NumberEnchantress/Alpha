@@ -82,7 +82,10 @@
     '\u09E6': 'o', '\u0E50': 'o', '\u0ED0': 'o', '\u0A66': 'o', '\u0AE6': 'o', '\u0C66': 'o', '\u0CE6': 'o', '\u0D66': 'o', '\u1040': 'o', '\u17E0': 'o',
     '\u0B66': 'o', '\u0BE6': 'o', '\u0F20': 'o', '\u1810': 'o', '\u05E1': 'o', '\u3147': 'o', '\u25CB': 'o', '\u25E6': 'o', '\u2218': 'o', '\u26AC': 'o', '\u0D20': 'o',
     '\u05D5': 'l', '\u05DF': 'l', '\u0627': 'l', '\u3163': 'l', '\u4E28': 'l', '\u3021': 'l', '\u2223': '|', '\u23D0': '|', '\u23AE': '|', '\u2502': '|', '\u2503': '|',
-    '\u2758': '|', '\u01C1': '|', '\uFFE8': '|', '\u4E00': '-', '\u2501': '-', '\u2574': '-', '\u2576': '-', '\u23AF': '-', '\u2E3A': '-', '\u201A': ',', '\u060C': ','
+    '\u2758': '|', '\u01C1': '|', '\uFFE8': '|', '\u4E00': '-', '\u2501': '-', '\u2574': '-', '\u2576': '-', '\u23AF': '-', '\u2E3A': '-', '\u201A': ',', '\u060C': ',',
+    // allowed characters that look like others; emoji shaped like ASCII signs
+    '\u00D0': '\u0110', '\u201C': '"', '\u201D': '"', '\u201E': '"', '\u2026': '...', '\u2795': '+', '\u2796': '-', '\u2797': '/', '\u274C': 'x', '\u2716': 'x',
+    '\u2B55': 'o', '\u2757': '!', '\u2755': '!', '\u2753': '?', '\u2754': '?', '\u203C': '!!', '\u2049': '!?', '\u00B4': "'"
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -105,7 +108,8 @@
     // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
     // (So "Mail" and "Mall" count as the same label: a refusal of two labels that
     // look different is harmless, two that look alike passing is not.)
-    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w');
+    // So are "cl" and "d", a backquote and an apostrophe, and two apostrophes and a quote.
+    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
@@ -126,20 +130,31 @@
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
   function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E').replace(JOINING, '$1'); return INVISIBLE.test(t) || HIDDEN.test(t); }
   // What is wrong with a piece of text that looks fine, or null.
-  var MIXED = 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters, or a Thai "๐" by an "O"), which can look like other text; type it again';
+  // Characters typed text may have (an allow-list; after many look-alikes
+  // from other alphabets and symbol blocks were found, version-36 stopped
+  // trying to list the bad ones): printable ASCII, Latin letters with accents
+  // (Latin-1 and Latin Extended-A, less the dotless i, kra, middle-dot L,
+  // n-apostrophe and long s, which look like other letters), the micro sign,
+  // degree, plus-minus, (c), (R), TM, dashes, curly quotes and the ellipsis.
+  // Emoji shown in colour are allowed too.
+  var ALLOWED = /^[\x20-\x7E\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u0130\u0132-\u0137\u0139-\u013E\u0141-\u0148\u014A-\u017E\u00B5\u00B0\u00B1\u00A9\u00AE\u2122\u2013\u2014\u2018\u2019\u201C\u201D\u2026]$/;
+  // An emoji sequence shown in colour: emoji style by default, or made so
+  // (U+FE0F, a keycap, a skin tone, a joiner, a tag flag).
+  function colourful(m) { return /[\uFE0F\u20E3\u200D\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]/u.test(m) || /^\p{Emoji_Presentation}/u.test(m); }
+  // The first character not allowed, or null.
+  function notAllowed(s) {
+    var rest = clean(s).replace(EMOJI, function (m) { return colourful(m) ? '' : m; });
+    for (var ch of rest) if (!ALLOWED.test(ch)) return ch;
+    return null;
+  }
   function textProblem(s) {
     if (!isStr(s)) return null;
     if (invisible(s)) return 'contains invisible characters; type it again';
     if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
     if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
-    // Latin letters with a letter or digit of any other script ("Lab \u0627",
-    // "Lab \u0E50"): many look like Latin letters or digits. (Text wholly in
-    // another script is fine, and so are Chinese, Japanese and Korean words
-    // beside Latin ones, as in "冷蔵 Fridge": their few look-alikes, such as
-    // "丨" and "ㅣ", are mapped above.)
-    if (/\p{Script=Latin}/u.test(s) && /(?=[\p{L}\p{Nd}])[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(s.normalize('NFKC'))) return MIXED;
-    var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u, /\p{Script=Lisu}/u, /\p{Script=Canadian_Aboriginal}/u].filter(function (re) { return re.test(s); });
-    if (scripts.length > 1) return MIXED;
+    if (blank(s)) return null; // nothing to see: "needs a label" says it better
+    var bad = notAllowed(s);
+    if (bad) return 'has a character that labels and names cannot have ("' + bad + '", U+' + bad.codePointAt(0).toString(16).toUpperCase().padStart(4, '0') + '). They can use the letters A-Z (with accents such as é or ñ too), digits, spaces, common punctuation and emoji. Letters from other alphabets and symbols are not allowed, because many look just like Latin letters or digits; type it again';
     return null;
   }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
@@ -158,13 +173,12 @@
   function looksAlike(a, b) { return distance(a, b) < MIN_COLOUR_DISTANCE || labDistance(a, b) < MIN_LAB_DISTANCE; }
   // A colour called by a standard name ("Black") must look like it.
   function standard(name) {
-    var n = name.toLowerCase();
+    var n = name.toLowerCase().replace(/^gray$/, 'grey');
     return COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0] || null;
   }
-  // A name that contains one standard colour word ("Navy blue", "Light
-  // grey") must be that kind of colour: the same hue family for colours,
-  // dark for black, light for white, unsaturated for grey.
-  // Hue ranges in degrees; pink also covers light reds (#ffc0cb), red only the darker ones.
+  // Whether a hex looks like the standard colour id w: the same hue family for
+  // colours, dark for black, light for white, unsaturated for grey. Hue ranges
+  // in degrees; pink also covers light reds (#ffc0cb), red only the darker ones.
   var FAMILY = { red: [340, 20], orange: [15, 45], yellow: [40, 70], green: [70, 170], blue: [170, 255], purple: [255, 320], pink: [280, 20] };
   function hsl(hex) {
     var c = rgb(hex).map(function (v) { return v / 255; }), max = Math.max.apply(null, c), min = Math.min.apply(null, c), l = (max + min) / 2, d = max - min, h = 0;
@@ -172,61 +186,16 @@
     if (d) h = max === c[0] ? 60 * (((c[1] - c[2]) / d) % 6) : max === c[1] ? 60 * ((c[2] - c[0]) / d + 2) : 60 * ((c[0] - c[1]) / d + 4);
     return [(h + 360) % 360, s, l];
   }
-  // Coloured emoji, by the standard colour word they show.
-  var EMOJI_COLOUR = {
-    '\u{1F534}': 'red', '\u{1F7E5}': 'red', '\u2764': 'red', '\u{1F7E0}': 'orange', '\u{1F7E7}': 'orange', '\u{1F9E1}': 'orange',
-    '\u{1F7E1}': 'yellow', '\u{1F7E8}': 'yellow', '\u{1F49B}': 'yellow', '\u{1F7E2}': 'green', '\u{1F7E9}': 'green', '\u{1F49A}': 'green',
-    '\u{1F535}': 'blue', '\u{1F7E6}': 'blue', '\u{1F499}': 'blue', '\u{1FA75}': 'blue', '\u{1F7E3}': 'purple', '\u{1F7EA}': 'purple', '\u{1F49C}': 'purple',
-    '\u26AB': 'black', '\u2B1B': 'black', '\u{1F5A4}': 'black', '\u26AA': 'white', '\u2B1C': 'white', '\u{1F90D}': 'white',
-    '\u{1F7E4}': 'brown', '\u{1F7EB}': 'brown', '\u{1F90E}': 'brown', '\u{1FA77}': 'pink', '\u{1FA76}': 'grey'
-  };
-  // Words in front of a colour word in names such as "darkred" or "lightseagreen".
-  var MODIFIERS = ['light', 'dark', 'deep', 'pale', 'hot', 'medium', 'bright', 'dim', 'dull', 'pastel', 'neon', 'royal', 'midnight', 'sea', 'steel', 'powder',
-    'dodger', 'cornflower', 'cadet', 'alice', 'lawn', 'spring', 'forest', 'lime', 'sky', 'slate', 'rosy', 'indian', 'misty', 'navy', 'lemon', 'dusty',
-    'baby', 'electric', 'true', 'pure', 'soft', 'vivid', 'very', 'web', 'mid', 'blood', 'cherry', 'fire', 'brick', 'olive', 'yellow', 'orange'];
-  function wordMismatch(name, hex) {
-    // "DarkRed", "LightBlue": words joined in one are split at their capitals;
-    // a coloured emoji counts as its colour word.
-    var named = String(name).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\p{Extended_Pictographic}/gu, function (c) { return ' ' + (EMOJI_COLOUR[c] || '') + ' '; });
-    var words = sameKey(named, true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
-    // "lightblue", "darkred", "deepskyblue": leading modifiers are taken off,
-    // and a modifier that is itself a colour word ("sky", "slate") is kept as a word.
-    words = words.reduce(function (out, w) {
-      for (var again = true; again;) {
-        again = false;
-        for (var j = 0; j < MODIFIERS.length; j++) {
-          var m = MODIFIERS[j];
-          if (w.length > m.length + 2 && w.indexOf(m) === 0) { out.push(m); w = w.slice(m.length); again = true; break; }
-        }
-      }
-      out.push(w); return out;
-    }, []);
-    // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
-    var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
-    // Other common colour words, by the standard colour they must look like.
-    // lavender: its usual colours lie in two families, so either fits.
-    var ALSO = { crimson: 'red', scarlet: 'red', wine: 'red', coral: 'orange', grape: 'purple', sand: 'yellow', beige: 'white', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
-      navy: 'blue', azure: 'blue', cobalt: 'blue', sky: 'blue', teal: 'blue', turquois: 'blue', aqua: 'blue', cyan: 'blue', sapphire: 'blue',
-      lime: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
-      violet: 'purple', lavender: ['purple', 'blue'], lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
-      magenta: 'pink', fuchsia: 'pink', rose: 'pink', salmon: 'pink',
-      gold: 'yellow', lemon: 'yellow', mustard: 'yellow', khaki: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
-      charcoal: 'grey', slate: 'grey', silver: 'grey', ivory: 'white', cream: 'white', snow: 'white', ebony: 'black', jet: 'black', onyx: 'black' };
-    // Olive lies between yellow and green: any hue from 40 to 170 degrees, not too dark or light.
-    if (words.some(function (w) { return w.indexOf('olive') === 0; })) { var ov = hsl(hex); return !(ov[0] >= 40 && ov[0] < 170 && ov[1] >= 0.2 && ov[2] > 0.08 && ov[2] < 0.75); }
-    var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) {
-      return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return [].concat(ALSO[a]).indexOf(id) >= 0 && w.indexOf(a) === 0; }); });
-    });
-    if (found.length !== 1) return false; // none, or a mix such as "blue-green"
-    var w = found[0], v = hsl(hex), h = v[0], s = v[1], l = v[2];
-    if (w === 'black') return l > 0.3;
-    if (w === 'white') return l < 0.8;
-    if (w === 'grey') return s > 0.25 && l > 0.1 && l < 0.9;
-    var f = FAMILY[w];
-    if (s < 0.2 || l < 0.08 || l > 0.95) return true; // too grey, dark or light to be a colour
-    if (w === 'red' && l > 0.7) return true;  // that light, it is pink
-    if (w === 'pink' && (h >= 340 || h < 20) && l < 0.55) return true; // that dark a red is not pink
-    return f[0] < f[1] ? !(h >= f[0] && h < f[1]) : !(h >= f[0] || h < f[1]);
+  function looksLike(w, hex) {
+    var v = hsl(hex), h = v[0], s = v[1], l = v[2];
+    if (w === 'black') return l <= 0.3;
+    if (w === 'white') return l >= 0.8 && s <= 0.5;
+    if (w === 'grey') return s <= 0.25 && l > 0.1 && l < 0.9;
+    var fr = FAMILY[w];
+    if (s < 0.2 || l < 0.08 || l > 0.95) return false; // too grey, dark or light to be a colour
+    if (w === 'red' && l > 0.7) return false;  // that light, it is pink
+    if (w === 'pink' && (h >= 340 || h < 20) && l < 0.55) return false; // that dark a red is not pink
+    return fr[0] < fr[1] ? h >= fr[0] && h < fr[1] : h >= fr[0] || h < fr[1];
   }
 
   // Problems with a preset, as plain sentences. Empty list = valid.
@@ -257,9 +226,13 @@
       if (tp(c.name)) { errors.push('The colour name "' + name.slice(0, 30) + '" ' + tp(c.name) + '.'); return; }
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
+      // A new or loaded preset uses the standard colours only, each looking
+      // like its name (version-36: reading colour words from names, such as
+      // "Navy blue" or "darkred", never covered them all). Stored presets keep
+      // their colours; the editor flags them.
       var std = standard(name);
-      // A colour named with a colour word ("Blue", "Navy blue") must be that kind of colour.
-      if (!stored && wordMismatch(name, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + (std ? name.toLowerCase() : 'its name') + '.');
+      if (!stored && !std) errors.push('The colour "' + name + '" is not one of the colours presets can use (' + COLOUR_CHOICES.map(function (x) { return x.name; }).join(', ') + '), so it cannot be known to look like its name.');
+      else if (!stored && !looksLike(std.id, c.hex)) errors.push('The colour "' + name + '" (' + c.hex + ') does not look like ' + std.name.toLowerCase() + ' (' + std.hex + ').');
       // Two colours that look alike, or share a name, cannot tell groups apart.
       if (names[K(name)]) errors.push('Two colours are called "' + name + '".');
       var near = seenHex.filter(function (s) { return looksAlike(s.hex, c.hex); })[0];

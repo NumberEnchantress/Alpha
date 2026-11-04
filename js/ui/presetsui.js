@@ -14,6 +14,10 @@
      reload the list when another window changes it (the storage event). */
   var KEY = 'preset.', ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
   var mine = [], broken = [], memoryOnly = false;
+  // id -> the first of today's checks a stored preset fails (saved by an older
+  // version, or with rules that grew stricter): it is listed and usable, with
+  // a warning here and in the info pane, until it is edited.
+  var warns = Object.create(null);
   var dlg = null, editing = null, status = '';
 
   function builtInIds() {
@@ -49,6 +53,8 @@
       if (!why) { names[plainKey(p.name)] = 1; ok.push(p); } else bad.push({ key: k, why: why });
     });
     mine = ok; broken = bad;
+    warns = Object.create(null);
+    ok.forEach(function (p) { var e = P.check(p); if (e.length) warns[p.id] = e[0]; });
   }
   function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
@@ -285,6 +291,7 @@
       return '<li class="preset-row' + (inUse ? ' in-use' : '') + '" data-id="' + esc(p.id) + '">' +
         '<div class="preset-name"><strong>' + esc(p.name) + '</strong> <span class="muted small">' + p.groups.length + ' groups' +
         (own ? ', yours' : ', built in') + (inUse ? ', <strong>in use</strong>' : '') + '</span></div>' +
+        (own && warns[p.id] ? '<p class="note-bad small">Saved by an older version, and it does not pass today\'s checks: ' + esc(warns[p.id]) + ' Edit it to fix this.</p>' : '') +
         '<div class="preset-groups small">' + p.groups.map(function (g) { return '<span class="pg"><strong>' + esc(g.label) + '</strong> ' + swatches(p, g) + '</span>'; }).join('') + '</div>' +
         '<div class="preset-actions">' +
         (inUse ? '' : '<button type="button" class="btn small" data-act="use">Use</button> ') +
@@ -638,6 +645,21 @@
     else if (act === 'close') { if (okToDiscard()) { editing = null; dlg.close(); } }
   }
 
+  function tooLong(max) { announce('That is the most a ' + (max === P.MAX_NAME ? 'name' : 'label') + ' can have (' + max + ' characters).'); }
+  // Typing or pasting past the limit: only what fits is put in, cut between
+  // characters as seen on screen, where the caret is.
+  function onBeforeInput(e) {
+    var t = e.target, max = Number(t.getAttribute && t.getAttribute('data-max'));
+    if (!max || e.isComposing || !/^insert/.test(e.inputType || '')) return;
+    var text = e.data != null ? e.data : e.dataTransfer ? e.dataTransfer.getData('text/plain') : null;
+    if (text == null) return;
+    var s = t.selectionStart, en = t.selectionEnd, room = max - (t.value.length - (en - s));
+    if (text.length <= room) return;
+    e.preventDefault();
+    var piece = room > 0 ? cut(text.replace(/[\r\n]+/g, ' '), room) : '';
+    if (piece) { t.setRangeText(piece, s, en, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); }
+    tooLong(max);
+  }
   function onInput(e) {
     var t = e.target;
     if (t.id === 'pe-file') { loadFile(t); return; }
@@ -646,7 +668,15 @@
     // could leave half an emoji or a Hindi letter without its vowel). Not while
     // a word is still being composed with an input method.
     var max = Number(t.getAttribute('data-max'));
-    if (max && t.value.length > max && !e.isComposing) t.value = cut(t.value, max);
+    if (max && t.value.length > max && !e.isComposing) {
+      // (typing and pasting are stopped before this, in onBeforeInput; this is
+      // for input methods and drops) back to the text before, caret kept
+      var pos = t.selectionStart, prev = t.getAttribute('data-prev'), over = t.value.length - max;
+      if (prev != null && prev.length <= max) { t.value = prev; t.setSelectionRange(Math.max(0, pos - over), Math.max(0, pos - over)); }
+      else t.value = cut(t.value, max);
+      tooLong(max);
+    }
+    if (max) t.setAttribute('data-prev', t.value);
     if (t.id === 'pe-name') { editing.draft.name = t.value; showErrors(); return; }
     var i = Number(t.getAttribute('data-i')), f = t.getAttribute('data-f');
     if (isNaN(i) || !f) return;
@@ -680,6 +710,7 @@
     dlg.addEventListener('click', onClick);
     dlg.addEventListener('change', onInput);
     dlg.addEventListener('input', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') onInput(e); });
+    dlg.addEventListener('beforeinput', onBeforeInput);
     dlg.addEventListener('compositionend', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') onInput(e); });
     // Esc with unsaved changes asks first. It is handled on the key press,
     // because Chromium stops honouring a prevented "cancel" after the first
@@ -747,5 +778,5 @@
     });
   }
 
-  Alpha.presetsUI = { init: init, open: open, all: all, find: find };
+  Alpha.presetsUI = { init: init, open: open, all: all, find: find, warning: function (id) { return warns[id] || null; } };
 })(window.Alpha);

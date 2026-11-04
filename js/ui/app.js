@@ -133,6 +133,21 @@
   }
 
   /* ---------- keyboard, mouse, touch ---------- */
+  // One column (760 px and narrower): the shelf view is below the map, and
+  // nothing scrolls while typing, so the search box stays put. Enter or a
+  // click on a result is a choice: then the shelf and its caption are shown.
+  function showShelf() {
+    if (!window.matchMedia || !window.matchMedia('(max-width: 760px)').matches) return;
+    requestAnimationFrame(function () {
+      var el = $('elev'), g = el.querySelector('.shelf-hi, .shelf-est'), cap = el.querySelector('.elev-caption');
+      if (!g) { el.scrollIntoView({ block: 'start' }); return; }
+      var a = g.getBoundingClientRect(), c = cap ? cap.getBoundingClientRect() : a;
+      var top = Math.min(a.top, c.top), bottom = Math.max(a.bottom, c.bottom);
+      // both in view if they fit, else the shelf at the top
+      var dy = bottom - top <= window.innerHeight - 12 ? (bottom > window.innerHeight ? bottom - window.innerHeight + 6 : top < 0 ? top - 6 : 0) : a.top - 6;
+      if (dy) window.scrollBy(0, dy);
+    });
+  }
   function onInputKey(e) {
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
@@ -141,7 +156,7 @@
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (S.active < 0 && S.results.length) { S.active = 0; updateActive(); }
-      if (S.active >= 0) choose(S.results[S.active].product);
+      if (S.active >= 0) { choose(S.results[S.active].product); showShelf(); }
       e.target.select(); // the next scan or typed search replaces the text
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -192,6 +207,7 @@
       S.active = Number(li.getAttribute('data-i'));
       updateActive();
       choose(S.results[S.active].product);
+      showShelf();
     });
     $('info').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-ndc]');
