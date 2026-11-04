@@ -363,9 +363,30 @@
   // "ATORVASTATIN 40 MG TAB" -> drug, strength, form; only when there is no
   // strength column and the text clearly has a number with a unit.
   // Micrograms may be written mcg, µg (micro sign or Greek mu) or ug.
-  var DESC = /^(.*?[a-z].*?)\s+(\d[\d.,/-]*\s*(?:mg|mcg|[µμ]g|ug|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose|hr|h|hours?|day|24\s*hr?))?)(?![a-z0-9])\s*(.*)$/i;
+  // A pack size at the end of a description ("90 CT", "30X10 CT", "2 500 EA").
+  var PACK = /\s*(?:\d[\d.,\s]*\s*(?:x|\/|-|of)\s*)*\d[\d.,\s]*\s*(ct|cnt|count|ea|tablets|tabs|capsules|caps)\.?$/i;
+  // { n, text }: n is the count when it is written plainly ("TAB 90 CT":
+  // digits after a word; "2,500 CT" too, but not in a file separated by
+  // semicolons), else null ("30X10 CT", "2 500 CT", "1.000 CT").
+  function packIn(desc, semi) {
+    var mm = PACK.exec(desc);
+    if (!mm) return null;
+    var text = mm[0].trim(), plain = (semi ? /^(\d+)\s*[a-z]+\.?$/i : /^(\d{1,3}(?:,\d{3})+|\d+)\s*[a-z]+\.?$/i).exec(text);
+    var before = desc.slice(0, mm.index).trim().split(/\s+/).pop() || '';
+    var n = plain && /\p{L}/u.test(before) && !/^(x|of|pk|pks|pack|packs|box|boxes|bx|case|cs|blister|card)$/i.test(before) && Number(plain[1].replace(/,/g, '')) >= 1 ? Number(plain[1].replace(/,/g, '')) : null;
+    return { n: n, text: text };
+  }
+  // DESC_ANY also takes g and ml: only to notice a Strength column that
+  // disagrees with the description. DESC splits a description, and only on a
+  // drug-strength unit: a bare gram or millilitre amount ("CREAM 30 G",
+  // "SOLUTION 473 ML", "NEEDLE 32G") is usually the size of the tube, bottle
+  // or needle, so it is never read as a strength (version-38).
+  var DESC_ANY = /^(.*?[a-z](?:.*?[a-z)\]])?)[,;]?\s+(\d[\d.,/-]*\s*(?:mg|mcg|[µμ]g|ug|g|ml|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose|hr|h|hours?|day|24\s*hr?))?)(?![a-z0-9])\s*(.*)$/i;
+  var DESC = /^(.*?[a-z](?:.*?[a-z)\]])?)[,;]?\s+(\d[\d.,/-]*\s*(?:mg|mcg|[µμ]g|ug|meq|%|units?(?:\/ml)?|iu)(?:\s*\/\s*\d*[\d.]*\s*(?:ml|g|actuation|dose|hr|h|hours?|day|24\s*hr?))?)(?![a-z0-9])\s*(.*)$/i;
 
   // Why a value is not a usable NDC, in words.
+  // Text compared for strengths: case, spaces and thousands commas aside, decimal points kept.
+  function strengthKey(s) { return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1'); }
   function whyBadNdc(raw) {
     var s = String(raw == null ? '' : raw).trim(), d = ndc.digits(s);
     if (!s) return 'no NDC';
@@ -440,13 +461,15 @@
   var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|mg|mcg|ug|[µμ]g|meq|oz|l|lb|tab|tabs|tablet|tablets|cap|caps|capsule|capsules|packet|packets|pkt|amp|ampule|ampoule|syringe|syr|patch|patches|inhaler|supp|suppository|sachet|pouch|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
   // A cell that says a value is not known.
   // Excel's error values (#N/A from a lookup that found nothing) say the same.
-  var PLACEHOLDER = /^(n\/?a|none|tbd|pending|unknown|null|-+|\?+|#n\/a|#ref!|#value!|#name\?|#div\/0!|#null!|#num!|#n\/a n\/a|#spill!|#calc!|#getting_data|#blocked!|#field!|#unknown!|#connect!|#busy!)$/i;
+  var PLACEHOLDER = /^(n[\/.]?a\.?|none|tbd|pending|unknown|null|-+|\?+|#n\/a|#ref!|#value!|#name\?|#div\/0!|#null!|#num!|#n\/a n\/a|#spill!|#calc!|#getting_data|#blocked!|#field!|#unknown!|#connect!|#busy!|#python!|#ext!)$/i;
   function blankCell(c) { return !String(c == null ? '' : c).trim(); }
+  var MAX_CELL = 1000;
   function importProducts(text, layout) {
     var p = parse(text), cols = mapColumns(p.fields), m = cols.map;
     var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], fileNotes: (cols.choices || []).slice(), problem: null, fatal: false,
       columns: { used: m, unused: cols.unused, missing: [] } };
     var products = [], seen = {}, lineOf = {}, firstPlace = {}, firstDrug = {}, firstOther = {};
+    var fd0 = function (n) { return (firstOther[n] || {}).desc; };
     var stop = function (msg) { report.problem = msg; report.fatal = true; return { products: [], lineOf: {}, report: report }; };
     if (p.empty) return stop('The file is empty.');
     if (p.problem) {
@@ -631,6 +654,10 @@
       };
       var note = function (s, routine) { report.notes.push(routine ? { row: line, ndc: get('ndc'), note: s, routine: true } : { row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
+      // A cell far longer than any drug name, place or note (pasted text, a
+      // damaged export): not read, and reading descriptions that long is slow.
+      var longAt = row.cells.findIndex(function (c) { return String(c == null ? '' : c).length > MAX_CELL; });
+      if (longAt >= 0) { report.skipped.push({ row: line, ndc: String(rawNdc).slice(0, 30), reason: 'the "' + (p.fields[longAt] || 'column ' + (longAt + 1)) + '" value is ' + String(row.cells[longAt]).length + ' characters long, more than the ' + MAX_CELL + ' any value here should need, so the row was not read' }); return; }
       if (repeatHeader(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
       var sp = splitAt(row);
       if (sp > 0) {
@@ -646,8 +673,9 @@
       if (seen[n]) {
         // Said when the duplicate gives another place: the first row is kept, so the other place is not used.
         var here = [get('location'), get('unit'), get('shelf')].join('|'), there = firstPlace[n];
-        var otherDrug = firstDrug[n] != null && key(get('drug')) && key(get('drug')) !== firstDrug[n];
-        var fd = firstOther[n] || {}, others = ['strength', 'countPerBottle', 'form'].filter(function (c) { return key(get(c)) && fd[c] && key(get(c)) !== fd[c]; });
+        // (compared with decimal points kept: "X 1.5 MG TAB" and "X 15 MG TAB" differ)
+        var otherDrug = firstDrug[n] != null && key(get('drug')) && strengthKey(get('drug')) !== fd0(n);
+        var fd = firstOther[n] || {}, others = ['strength', 'countPerBottle', 'form'].filter(function (c) { var v = c === 'strength' ? strengthKey(get(c)) : key(get(c)); return v && fd[c] && v !== fd[c]; });
         report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] + (otherDrug
           ? '; it names another drug ("' + get('drug').slice(0, 40) + '") than line ' + seen[n] + ', which was kept, so one of the two NDCs is probably wrong: check both lines'
           : '') + (others.length ? '; it gives another ' + others.map(function (c) { return (c === 'countPerBottle' ? 'count' : c) + ' ("' + get(c).slice(0, 20) + '")'; }).join(' and ') + ' than line ' + seen[n] + ', which was kept: check which is right' : '') + (here !== there
@@ -660,14 +688,15 @@
       if (PLACEHOLDER.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name (the cell says "' + drug + '")' }); return; }
       // A drug name with no letters ("060") is a value from another column: the row is shifted.
       if (!/\p{L}/u.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'the drug name "' + drug.slice(0, 30) + '" has no letters, so the values are probably shifted (a missing or extra field) and cannot be matched to columns safely' }); return; }
-      seen[n] = line; lineOf[n] = line; firstPlace[n] = [get('location'), get('unit'), get('shelf')].join('|'); firstDrug[n] = key(drug); firstOther[n] = { strength: key(get('strength')), countPerBottle: key(get('countPerBottle')), form: key(get('form')) };
+      seen[n] = line; lineOf[n] = line; firstPlace[n] = [get('location'), get('unit'), get('shelf')].join('|'); firstDrug[n] = key(drug); firstOther[n] = { strength: strengthKey(get('strength')), countPerBottle: key(get('countPerBottle')), form: key(get('form')), desc: strengthKey(get('drug')) };
 
-      var prod = { ndc: n, drug: drug }, descCount = null, semi = p.delimiter === ';';
+      var prod = { ndc: n, drug: drug }, semi = p.delimiter === ';';
+      var descCount = packIn(drug, semi); // the pack count a description gives, if any
       var strength = get('strength'), form = get('form');
       // M3: a Strength column that disagrees with the strength in the description.
       if (m.strength && strength) {
-        var ds2 = DESC.exec(drug);
-        if (ds2 && key(ds2[2]) !== key(strength)) { note('the description says "' + ds2[2].trim() + '" but the "' + m.strength + '" column says "' + strength + '"; strength left unknown'); strength = ''; }
+        var ds2 = DESC_ANY.exec(drug);
+        if (ds2 && strengthKey(ds2[2]) !== strengthKey(strength)) { note('the description says "' + ds2[2].trim() + '" but the "' + m.strength + '" column says "' + strength + '"; strength left unknown'); strength = ''; }
       }
       if (!m.strength) {
         var sm = DESC.exec(drug);
@@ -681,15 +710,8 @@
           // "TAB 1000 CT": the pack count is not part of the form. The number is
           // taken whole ("2,500 CT", "1.000 CT") and read like the count column:
           // "1.000" or "0" is not a count, so it is left unknown, with a note.
-          var ct = /^(.*?)\s*(?<![\d.,])(\d[\d.,]*)\s*(ct|cnt|count|ea|tablets|tabs|capsules|caps)\.?$/i.exec(rest);
-          if (ct) {
-            if (restUsed) { rest = ct[1].trim(); restUsed = !!rest; }
-            else rest = ct[1].trim();
-            var dc = int(ct[2], 1, semi), ctText = ct[2] + ' ' + ct[3];
-            if (dc.bad) note('"' + ctText + '" in the description ' + dc.bad + ', so the count from the description is not used');
-            else if (!get('countPerBottle')) { prod.countPerBottle = dc.value; note('"' + ctText + '" in the description read as a count of ' + dc.value, true); }
-            else descCount = { n: dc.value, text: ctText };
-          }
+          var ct = PACK.exec(rest);
+          if (ct) { rest = rest.slice(0, ct.index).trim(); if (restUsed) restUsed = !!rest; }
           // A form is words ("TAB", "ER CAPSULE"); a bare number or a word plus a
           // number is not known to be one, so it is left out, with a note.
           var formOk = /^[\p{L}][\p{L}\s.\/-]*$/u.test(rest);
@@ -702,6 +724,7 @@
         }
       }
       if (strength && PLACEHOLDER.test(strength)) { note('strength "' + strength + '" read as not given'); strength = ''; }
+      else if (strength && /\d[.,]\d{3}(?!\d)|\d,\d{1,2}(?!\d)/.test(strength)) { note('strength "' + strength + '" has a mark that may be a decimal point or a thousands mark (1.000 can be 1 or 1000), so it cannot be read safely; strength left unknown'); strength = ''; }
       else if (strength && !/[\p{L}%]/u.test(strength) && !/^\d+(\.\d+)?:\d+$/.test(strength)) { note('strength "' + strength + '" has no unit (such as mg), so it may be a value from another column; strength left unknown'); strength = ''; }
       ['form', 'manufacturer', 'notes'].forEach(function (c) { if (get(c) && PLACEHOLDER.test(get(c))) note(c + ' "' + get(c) + '" read as not given'); });
       if (form && PLACEHOLDER.test(form)) form = '';
@@ -775,7 +798,13 @@
 
       var cnt = int(get('countPerBottle'), 1, semi);
       if (cnt.bad) note('count "' + get('countPerBottle') + '" ' + cnt.bad + '; left unknown');
-      else if (cnt.value != null && descCount && descCount.n !== cnt.value) note('count ' + cnt.value + ' in the "' + m.countPerBottle + '" column, but the description says "' + descCount.text + '"; count left unknown');
+      else if (cnt.value != null && descCount && descCount.n != null && descCount.n !== cnt.value) note('count ' + cnt.value + ' in the "' + m.countPerBottle + '" column, but the description says "' + descCount.text + '"; count left unknown');
+      else if (cnt.value != null && descCount && descCount.n == null) { prod.countPerBottle = cnt.value; note('the description also gives a pack size ("' + descCount.text + '") that cannot be read safely; check the count ' + cnt.value + ' from the "' + m.countPerBottle + '" column'); }
+      else if (cnt.value == null && descCount && !get('countPerBottle')) note('the description gives a pack size ("' + descCount.text + '"); counts are read only from a count column, so the count is left unknown', true);
+      // A "Pack Size" column for a liquid, cream or powder ("SOLUTION 473 ML",
+      // 473) holds the bottle or tube size, not a count of units (version-38).
+      else if (cnt.value != null && !/count/.test(key(m.countPerBottle)) && /\d\s*(ml|l|g|gm|grams?|oz|fl\.?\s*oz)\b/i.test(get('drug')) && !/\b(tab|tabs|tablets?|caps?|capsules?)\b/i.test(get('drug')))
+        note('"' + m.countPerBottle + '" is ' + cnt.value + ', but the description gives a volume or weight ("' + get('drug').slice(0, 60) + '"), so the number may be the package size, not a count; count left unknown');
       else if (cnt.value != null) prod.countPerBottle = cnt.value;
       var rk = int(get('rank'), 1, semi);
       if (rk.bad) note('rank "' + get('rank') + '" ' + rk.bad + '; left unknown');
@@ -852,7 +881,8 @@
     // NDC there refuses the list like any other bad line.
     // (an NDC in any form, "NDC 9999..." too, a number in scientific notation, or a run of 8 or more digits: data)
     var looksLikeData = !first.some(function (c) { c = String(c).trim(); return /\p{L}/u.test(c) && !SCI.test(c); }) ||
-      first.some(function (c) { c = String(c).trim(); return !!ndcIn(c) || SCI.test(c) || /\d{8}/.test(c.replace(/[-\s]/g, '')); });
+      first.some(function (c) { c = String(c).trim(); return !!ndcIn(c) || SCI.test(c) || /\d{8}/.test(c.replace(/["'\s-]/g, '')) ||
+        PLACEHOLDER.test(c) || ((c.match(/\d/g) || []).length >= 8 && !/\p{L}{3}/u.test(c)); }); // (no word of 3 letters: "1OO1" is not one)
     if (at >= 0) { col = at; start = 1; }
     else {
       if (!looksLikeData) {
