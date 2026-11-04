@@ -58,7 +58,15 @@
     var r = decodeBytes(bytes);
     if (r.text == null) return r;
     r.text = r.text.replace(/\u001a$/, '');
-    var m = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/.exec(r.text);
+    // Files that are text but not a CSV, named for what they are.
+    var head = r.text.replace(/^﻿/, '').slice(0, 400).trim();
+    if (/^<(!doctype\s+html|html|table|\?xml)/i.test(head)) return { problem: 'This is a web page or XML file (some programs save one with an .xls or .csv name when they "export to Excel"), not a CSV. Open it in Excel and use File > Save As > "CSV UTF-8", then import that.' };
+    if (/^[{\[]\s*["{\[]/.test(head)) return { problem: 'This is a JSON file, not a CSV. Choose the CSV export of the shelf list.' };
+    if (/^%PDF/.test(head)) return { problem: 'This is a PDF, not a CSV. Choose the CSV export of the shelf list.' };
+    // A vertical tab is how FileMaker writes a line break inside a cell: like Alt+Enter, refused at its line.
+    var vt = r.text.indexOf('\u000b');
+    if (vt >= 0) return { problem: 'Line ' + r.text.slice(0, vt).split(/\r\n|\r|\n/).length + ' holds a vertical tab, which some programs (FileMaker) write for a line break inside a cell. A line break inside a value cannot be read safely: replace it with a space and import again.' };
+    var m = /[\u0000-\u0008\u000c\u000e-\u001f\u007f-\u009f]/.exec(r.text);
     if (m) {
       var line = r.text.slice(0, m.index).split(/\r\n|\r|\n/).length, code = m[0].charCodeAt(0);
       return { problem: 'Line ' + line + (code >= 128 && r.encoding === 'Windows-1252'
@@ -157,7 +165,7 @@
     for (var j = 0; j < Math.min(10, raw.length) && hi < 0; j++) if (/\bndc\b/i.test(raw[j])) hi = j;
     if (hi > 0) ls = ls.slice(hi);
     var best = ',', bestScore = -1;
-    [',', ';', '\t'].forEach(function (c) {
+    [',', ';', '\t', '|'].forEach(function (c) {
       if (!ls.length) return;
       var head = ls[0].split(c).length;
       if (head < 2) return;
@@ -180,16 +188,18 @@
      PAD, ="99999...") is text to every CSV reader and cannot move a value
      boundary, so it is kept as written. Returns { line, why } for the first
      problem, or null. */
-  // Returns every problem line ({ line, why }), in order (at most 200). After
-  // a problem, checking starts again at the next line, as if the lines before
-  // it were right, so one refusal can name all the lines to fix.
+  // Returns every problem line ({ line, why }), in order (at most QUOTE_CAP;
+  // the message says so when it is reached). After a problem, checking starts
+  // again at the next line, as if the lines before it were right, so one
+  // refusal can name all the lines to fix.
+  var QUOTE_CAP = 20000;
   function quoteSyntax(t, delim) {
     var n = t.length, i = 0, line = 1, D = delim.charCodeAt(0), Q = 34, NL = 10, out = [];
     var skipLine = function (why, at) {
       out.push({ line: at, why: why });
       while (i < n && t.charCodeAt(i) !== NL) i++;
     };
-    while (i <= n && out.length < 200) {
+    while (i <= n && out.length < QUOTE_CAP) {
       if (t.charCodeAt(i) === Q) {
         var from = line, start = i; i++;
         var closed = false;
@@ -249,7 +259,7 @@
         parser.abort();
         return;
       }
-      if (cells.some(function (c) { return String(c).trim() !== ''; })) {
+      if (cells.some(function (c) { return String(c).replace(/[​-‍⁠﻿]/g, '').trim() !== ''; })) { // (zero-width characters alone: a blank line)
         out.push({ cells: cells, line: l, endLine: l + inner });
         if (expected == null) expected = cells.length;
       }
@@ -288,7 +298,7 @@
   function quoteProblem(pr, lastLine, what, all) {
     var more = (all || []).slice(1);
     return 'Nothing was ' + what + ' from this file. Line ' + pr.line + ': ' + pr.why + '. ' +
-      (more.length ? 'Also line' + (more.length > 1 ? 's ' : ' ') + more.slice(0, 8).map(function (x) { return x.line; }).join(', ') + (more.length > 8 ? ' and ' + (more.length - 8) + ' more' : '') + ' (all listed below). ' : '') +
+      (more.length ? 'Also line' + (more.length > 1 ? 's ' : ' ') + more.slice(0, 8).map(function (x) { return x.line; }).join(', ') + (more.length > 8 ? ' and ' + (more.length - 8) + ' more' : '') + ((all || []).length >= QUOTE_CAP ? ' (the first ' + QUOTE_CAP + ' are listed below; there may be more). ' : ' (all listed below). ') : '') +
       'Fix ' + (more.length ? 'those lines' : 'that line') + ' (in the spreadsheet, or in a text editor) and import again; until then the data in use stays as it is.';
   }
 
@@ -342,6 +352,7 @@
     var s = String(raw == null ? '' : raw).trim(), d = ndc.digits(s);
     if (!s) return 'no NDC';
     if (SCI.test(s)) return 'NDC "' + s + '" was turned into a number by a spreadsheet (scientific notation); format the column as text and export again';
+    if (/[​-‍⁠﻿]/.test(s)) return 'NDC "' + s.replace(/[​-‍⁠﻿]/g, '') + '" holds an invisible character (a zero-width space, often pasted from a web page): retype it';
     if (!d.length) return 'NDC "' + s + '" has no digits';
     if (/\p{L}/u.test(s)) return '"' + s.slice(0, 40) + '" is not an NDC';
     if (d.length === 10) return 'NDC "' + s + '" has 10 digits and no hyphens, so the 5-4-2 form cannot be known (a leading zero lost in a spreadsheet, or a 10-digit NDC written without hyphens)';
@@ -403,7 +414,7 @@
     var trailing = rows.filter(function (r) { return r.count === mode; }).every(function (r) { return r.cells.slice(width).every(blankCell); });
     return 'Most rows (' + freq[mode] + ' of ' + rows.length + ', lines ' + rows[0].line + '-' + rows[rows.length - 1].line + ') have ' + mode + ' fields, but the header has ' + width + ', so it cannot be known which values belong to which column. ' +
       (mode > width && trailing ? 'Usually each line ends with a comma and the header does not: add ' + (mode - width) + ' comma' + (mode - width > 1 ? 's' : '') + ' to the end of the header line, or remove the trailing commas from the rows.'
-        : mode > width ? 'A value with a comma in it is probably not in quotes on those rows (such as Teva, Inc.): put such values in quotes ("Teva, Inc."), for example by saving the file again from a spreadsheet as CSV.'
+        : mode > width ? 'A value with a comma in it is probably not in quotes on those rows (such as Teva, Inc.): put such values in quotes ("Teva, Inc."), for example by saving the file again from a spreadsheet as CSV. Or the header lacks the name of a column at the end: add it.'
         : 'The header may end with a comma the rows do not have, or the rows may leave off empty values at the end: make the header and the rows match.') +
       ' Nothing was imported; fix the file and import again.';
   }
@@ -415,7 +426,7 @@
     var p = parse(text), cols = mapColumns(p.fields), m = cols.map;
     var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], fileNotes: (cols.choices || []).slice(), problem: null, fatal: false,
       columns: { used: m, unused: cols.unused, missing: [] } };
-    var products = [], seen = {}, lineOf = {};
+    var products = [], seen = {}, lineOf = {}, firstPlace = {};
     var stop = function (msg) { report.problem = msg; report.fatal = true; return { products: [], lineOf: {}, report: report }; };
     if (p.empty) return stop('The file is empty.');
     if (p.problem) {
@@ -434,7 +445,8 @@
       var at = null;
       p.rows.slice(0, 10).forEach(function (r) { if (!at && r.cells.some(function (c) { return COLUMNS.ndc.indexOf(key(c)) >= 0; })) at = r.line; });
       return stop('No NDC column found (expected a header such as "NDC"), so ' + none +
-        (at ? ' The header seems to be on line ' + at + ': remove the line' + (at - p.headLine > 1 ? 's' : '') + ' above it (a title, for example) and import again.' : ''));
+        (at ? ' The header seems to be on line ' + at + ': remove the line' + (at - p.headLine > 1 ? 's' : '') + ' above it (a title, for example) and import again.'
+          : ' The header (line ' + p.headLine + ') has the columns ' + p.fields.slice(0, 8).map(function (f) { return '"' + String(f).slice(0, 25) + '"'; }).join(', ') + (p.fields.length > 8 ? ', ...' : '') + ': rename the one that holds the NDCs to "NDC" and import again.'));
     }
     if (!m.drug) return stop('No drug name column found (expected a header such as "Drug", "Description" or "Item description"), so ' + none);
     // A drug column of yes/no or number values is a flag or a code column under a drug-like name.
@@ -611,12 +623,19 @@
       if (xl.how) { note('NDC ' + rawNdc + ' read as ' + xl.value + ' (' + xl.how + ')'); rawNdc = xl.value; }
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
-      if (seen[n]) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] }); return; }
+      if (seen[n]) {
+        // Said when the duplicate gives another place: the first row is kept, so the other place is not used.
+        var here = [get('location'), get('unit'), get('shelf')].join('|'), there = firstPlace[n];
+        report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] + (here !== there
+          ? '; it gives another place (location ' + (get('location') || 'none') + (get('unit') ? ', unit ' + get('unit') : '') + ', shelf ' + (get('shelf') || 'none') + ') than line ' + seen[n] + ', which was kept: check which is right'
+          : '') });
+        return;
+      }
       var drug = get('drug');
       if (!drug) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name' }); return; }
       // A drug name with no letters ("060") is a value from another column: the row is shifted.
       if (!/\p{L}/u.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'the drug name "' + drug.slice(0, 30) + '" has no letters, so the values are probably shifted (a missing or extra field) and cannot be matched to columns safely' }); return; }
-      seen[n] = line; lineOf[n] = line;
+      seen[n] = line; lineOf[n] = line; firstPlace[n] = [get('location'), get('unit'), get('shelf')].join('|');
 
       var prod = { ndc: n, drug: drug };
       var strength = get('strength'), form = get('form');
@@ -663,7 +682,10 @@
           var exact = [], loose = [];
           layout.locations.forEach(function (lc) { lc.units.forEach(function (u) {
             if (String(u.id).toUpperCase() === rawLoc.toUpperCase()) exact.push([u, lc]);
-            else if (key(u.id) === key(rawLoc)) loose.push([u, lc]);
+            // Punctuation aside only for codes with letters ("FMN" for FM-N): a number
+            // with a dash, dot or slash ("06-5", "07.2", "0/60") is an aisle-bay bin or
+            // a decimal, not unit 065 or 072.
+            else if (/[a-z]/i.test(rawLoc) && key(u.id) === key(rawLoc)) loose.push([u, lc]);
           }); });
           var pick = exact.length === 1 ? exact[0] : !exact.length && loose.length === 1 ? loose[0] : null;
           if (pick) { unitInLoc = pick[0]; loc = pick[1]; prod.location = loc.code; note('location "' + rawLoc + '" read as ' + loc.code + ', unit ' + unitInLoc.id); }
