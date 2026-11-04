@@ -218,7 +218,7 @@
       if (rep.productsEncoding && rep.productsEncoding.note) out.push([rep.productsFile, 'encoding', '', '', rep.productsEncoding.note]);
       (rep.products.misfits || []).forEach(function (s) { out.push([rep.productsFile, 'line to fix', s.row, '', s.why + ': ' + s.text]); });
       rep.products.skipped.forEach(function (s) { out.push([rep.productsFile, 'not imported', s.row, s.ndc, s.reason]); });
-      rep.products.notes.forEach(function (n) { out.push([rep.productsFile, 'note', n.row, n.ndc, n.note]); });
+      rep.products.notes.forEach(function (n) { out.push([rep.productsFile, n.routine ? 'read' : 'note', n.row, n.ndc, n.note]); }); // read: how a value was read (routine)
     }
     if (rep.robot) {
       if (rep.robot.problem) out.push([rep.robotFile, 'problem', '', '', rep.robot.problem]);
@@ -269,7 +269,7 @@
           (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
         h += '<h4>Rows not imported</h4>' + table(p.skipped, [['row', 'Line'], ['ndc', 'NDC'], ['reason', 'Why']], 'None.');
         var check = p.notes.filter(function (n) { return !n.routine; }), routine = p.notes.filter(function (n) { return n.routine; });
-        h += '<h4>Imported, with notes to check</h4>' + table(check, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
+        h += '<h4>' + (notApplied ? 'Read, with notes to check' : 'Imported, with notes to check') + '</h4>' + table(check, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
         if (routine.length) h += '<details><summary>How ' + routine.length + ' value' + (routine.length > 1 ? 's were' : ' was') + ' read (descriptions split, Excel text)</summary>' + table(routine, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']]) + '</details>';
       }
     }
@@ -277,10 +277,14 @@
       var r = rep.robot;
       if (r.problem) h += '<p class="note-bad" data-testid="robot-problem">' + esc(rep.robotFile) + ': ' + esc(r.problem) + '</p>';
       if (r.fatal) {
-        var bad = r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; });
+        // Its other notes too, as in its report CSV.
+        var bad = r.skipped.map(function (x) { return { row: x.row, ndc: x.ndc, why: x.reason }; })
+          .concat((r.notFound || []).map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; }))
+          .concat((r.notes || []).map(function (x) { return { row: x.row, ndc: x.ndc, why: x.note }; }));
+        bad.sort(function (a, b) { return (a.row === '-' ? 1e9 : a.row) - (b.row === '-' ? 1e9 : b.row); });
         return h + encodingNote(rep.robotEncoding) + table(bad, [['row', 'Line'], ['ndc', 'NDC'], ['why', 'Why']]) + '<p class="small">' + esc(rep.storedNote) + '</p>' + undoBtn(rep) + REPORT_BTN + '</div>';
       }
-      h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + ' NDCs, <strong>' + r.matched + ' marked as in the robot</strong>' +
+      h += '<p><strong>' + esc(rep.robotFile) + '</strong>: ' + r.rows + (r.rows === 1 ? ' NDC, <strong>' : ' NDCs, <strong>') + r.matched + ' marked as in the robot</strong>' +
         (r.movedToRobot ? ' (' + r.movedToRobot + (r.movedToRobot === 1 ? ' had no location and now shows' : ' had no location and now show') + ' the robot)' : '') + ', ' + r.notFound.length + ' not in the product list, ' + r.skipped.length + ' unusable.</p>' +
         encodingNote(rep.robotEncoding);
       var rrows = r.notFound.map(function (x) { return { row: x.row, ndc: x.ndc, why: 'not in the product list' }; })

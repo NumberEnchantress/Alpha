@@ -106,7 +106,11 @@
     // "Lab l"): both compare as "l" (and so does i, to keep case ignored).
     // Carons on d, l, t and L draw like an apostrophe after the letter; a breve
     // and a caron, and a diaeresis and a double acute, differ by a few pixels.
-    var d = clean(s).normalize('NFD').replace(/([dltL])\u030C/g, "$1'").replace(/\u030C/g, '\u0306').replace(/\u030B/g, '\u0308');
+    // Marks under a letter (dot below, ogonek, cedilla, comma below...) are a
+    // few pixels at label size, so they are dropped: "\u1EB9", "\u0119" and "e" compare
+    // the same. A horn ("\u01AF", "\u01A1") draws like an apostrophe after the letter.
+    var d = clean(s).normalize('NFD').replace(/([dltL])\u030C/g, "$1'").replace(/\u030C/g, '\u0306').replace(/\u030B/g, '\u0308')
+      .replace(/\u031B/g, "'").replace(/[\u0316-\u031A\u031C-\u0333\u0339-\u033C]/g, '');
     var k = skel(skel(d).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
     // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
     // (So "Mail" and "Mall" count as the same label: a refusal of two labels that
@@ -115,8 +119,11 @@
     // Every emoji or pictograph left counts as the same mark (U+E000, which
     // typed text cannot hold): many look alike, and one the computer's font
     // lacks draws as the same box as any other.
-    if (!words) k = k.replace(EMOJI, '\uE000');
-    return words ? k : k.replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
+    // The allowed symbols with emoji twins (check mark, bullet, arrows: \u2713 and
+    // \u2714, \u2191 and \u2B06, \u2022 and \u25AA) count as that same mark too.
+    if (!words) k = k.replace(EMOJI, '\uE000').replace(/[\u2713\u2022\u2190-\u2193]/g, '\uE000');
+    // A run of dashes looks like one long dash ("A--B", "A\u2014B").
+    return words ? k : k.replace(/-+/g, '-').replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
   }
   // Text with nothing but accent marks shows as nothing.
   function blank(s) { return !clean(s).replace(/\p{M}/gu, '').trim(); }
@@ -210,7 +217,8 @@
         return;
       }
       var name = clean(c.name);
-      if (tp(c.name)) { errors.push('The colour name "' + name.slice(0, 30) + '" ' + tp(c.name) + '.'); return; }
+      // Hidden characters are named in the message ("Bla[U+200B]ck"), not shown as a space.
+      if (tp(c.name)) { errors.push('The colour name "' + c.name.slice(0, 30).replace(/[\p{Cf}\p{Cc}\p{Cn}\p{Co}­͏ᅟᅠㅤﾠ⠀︀-️]/gu, function (ch) { return '[U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0') + ']'; }) + '" ' + tp(c.name) + '.'); return; }
       if (name.length > MAX_COLOUR_NAME) { errors.push('The colour name "' + name.slice(0, 30) + '…" is longer than ' + MAX_COLOUR_NAME + ' characters.'); return; }
       if (colours[c.id]) { errors.push('The colour id "' + c.id + '" is listed twice.'); return; }
       // A new or loaded preset uses the standard colours only, each looking

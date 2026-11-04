@@ -98,6 +98,8 @@
     if (notice) return notice;
     var w = s && Alpha.presetsUI && Alpha.presetsUI.warning ? Alpha.presetsUI.warning(s.id) : null;
     if (w) return 'The basket preset in use, "' + s.name + '", was saved by an older version and does not pass today\'s checks: ' + w + ' Edit it in Settings > Edit basket presets.';
+    var a = s && Alpha.presetsUI && Alpha.presetsUI.alike ? Alpha.presetsUI.alike(s.id) : null;
+    if (a != null) return 'The basket preset in use, "' + s.name + '", has a name that looks the same on screen as the preset "' + a + '". Rename one of them in Settings > Edit basket presets.';
     if (usable && !saved) return 'A change to the settings could not be saved (this browser\'s storage may be full). It lasts until the page is closed.';
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';

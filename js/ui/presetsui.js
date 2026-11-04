@@ -18,6 +18,9 @@
   // version, or with rules that grew stricter): it is listed and usable, with
   // a warning here and in the info pane, until it is edited.
   var warns = Object.create(null);
+  // A stored preset whose name looks the same as an earlier one's: id -> that name.
+  var alike = Object.create(null);
+  function alikeText(id) { return alike[id] != null ? 'Its name looks the same on screen as the preset "' + alike[id] + '". Rename one of them so they can be told apart.' : null; }
   var dlg = null, editing = null, status = '';
 
   function builtInIds() {
@@ -55,6 +58,12 @@
     mine = ok; broken = bad;
     warns = Object.create(null);
     ok.forEach(function (p) { var e = P.check(p); if (e.length) warns[p.id] = e[0]; });
+    // Names that look the same as an earlier one (built in first, then by
+    // storage key) stay usable but are said; a window renames its own.
+    alike = Object.create(null);
+    var seen = Object.create(null);
+    (ds0.basketSchemes || []).forEach(function (p) { seen[P.sameKey(p.name)] = P.clean(p.name); });
+    ok.forEach(function (p) { var sk = P.sameKey(p.name); if (seen[sk] != null) alike[p.id] = seen[sk]; else seen[sk] = P.clean(p.name); });
   }
   function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
@@ -93,7 +102,7 @@
     try { waitRoom = JSON.parse(store.raw('presets-waiting') || '[]'); } catch (e) { waitRoom = []; }
     if (!Array.isArray(waitRoom)) waitRoom = [];
     if (o.list) {
-      var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false, freeName = null;
+      var used = builtInIds(), seenIds = Object.create(null), have = Object.create(null), keep = [], moved = false, freeName = null, movedKeys = [];
       store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
       o.list.forEach(function (p) {
         if (!presetLike(p)) { notPresets++; keep.push(p); return; }
@@ -105,9 +114,13 @@
         var stored = goodId && store.raw(KEY + p.id) != null;
         var id = goodId && !stored ? p.id : freeId(p.name, used);
         if (!freeName) freeName = nameFreer();
-        if (store.set(KEY + id, Object.assign({}, p, { id: id, name: freeName(p.name) }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; }
+        var newName = freeName(p.name);
+        if (store.set(KEY + id, Object.assign({}, p, { id: id, name: newName }))) { used[id] = 1; have[contentKey(p)] = 1; moved = true; if (newName !== p.name) movedKeys.push(entryKey(p)); }
         else { notMigrated++; keep.push(p); stillWaiting.push(contentKey(p)); }
       });
+      // Renamed on the way (its name was taken): remembered as moved, so an
+      // older tab writing the list again does not offer it for Restore.
+      if (movedKeys.length) store.setRaw('presets-restored', JSON.stringify(restoredKeys().concat(movedKeys).slice(-500)));
       if (moved) writeOld(keep);
       // This version moved (part of) the list: say so, and remember the
       // entries still waiting for room, the only ones tried again unasked.
@@ -149,16 +162,16 @@
   // again does not offer one again after its name got " (2)".
   function restoredKeys() { try { var r = JSON.parse(store.raw('presets-restored') || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
   // Returns the names restored. only: an entry's key (one entry), or null (all).
-  var gone = false;
+  var gone = false, already = 0;
   function restoreOld(only) {
-    gone = false;
+    gone = false; already = 0;
     var o = oldList(); if (!o.list) { gone = only != null; return []; }
     var used = builtInIds(), keep = [], names = [], found = false, restoredNow = [], have = Object.create(null), free = nameFreer();
     store.keys(KEY).forEach(function (k) { var q = null; try { q = JSON.parse(store.raw(k)); } catch (e) { q = null; } if (presetLike(q)) have[contentKey(q)] = 1; });
     o.list.forEach(function (p) {
       if (!presetLike(p) || (only != null && (found || entryKey(p) !== only))) { keep.push(p); return; }
       found = true;
-      if (have[contentKey(p)]) return; // stored already
+      if (have[contentKey(p)] || restoredKeys().indexOf(entryKey(p)) >= 0) { already++; return; } // stored already (perhaps renamed, or restored in another window)
       have[contentKey(p)] = 1;
       var id = freeId(p.name, used), name = free(p.name);
       if (store.set(KEY + id, Object.assign({}, p, { id: id, name: name }))) { used[id] = 1; names.push(typeof name === 'string' ? name : '(no name)'); restoredNow.push(entryKey(p)); } else keep.push(p);
@@ -191,6 +204,15 @@
       if (!p || typeof p.name !== 'string') return;
       var was = p.name; p.name = uniqueName(was);
       if (store.set(b.key, p)) out.push('Another window saved a preset named "' + was + '" at the same moment, so yours is now "' + p.name + '".');
+    });
+    // Saved here with a name that looks the same as an earlier preset's
+    // (another window saved it at the same moment): this one is renamed.
+    mine.forEach(function (q) {
+      if (!mySaves[q.id] || alike[q.id] == null) return;
+      var p = null; try { p = JSON.parse(store.raw(KEY + q.id)); } catch (e) { p = null; }
+      if (!p || typeof p.name !== 'string') return;
+      var was = p.name; p.name = uniqueName(was);
+      if (p.name !== was && store.set(KEY + q.id, p)) out.push('Another window saved a preset named "' + alike[q.id] + '", which looks the same as "' + was + '", at the same moment, so yours is now "' + p.name + '".');
     });
     if (out.length) loadMine();
     return out;
@@ -292,6 +314,7 @@
         '<div class="preset-name"><strong>' + esc(p.name) + '</strong> <span class="muted small">' + p.groups.length + ' groups' +
         (own ? ', yours' : ', built in') + (inUse ? ', <strong>in use</strong>' : '') + '</span></div>' +
         (own && warns[p.id] ? '<p class="note-bad small">Saved by an older version, and it does not pass today\'s checks: ' + esc(warns[p.id]) + ' Edit it to fix this.</p>' : '') +
+        (own && alike[p.id] != null ? '<p class="note-bad small">' + esc(alikeText(p.id)) + '</p>' : '') +
         '<div class="preset-groups small">' + p.groups.map(function (g) { return '<span class="pg"><strong>' + esc(g.label) + '</strong> ' + swatches(p, g) + '</span>'; }).join('') + '</div>' +
         '<div class="preset-actions">' +
         (inUse ? '' : '<button type="button" class="btn small" data-act="use">Use</button> ') +
@@ -491,6 +514,16 @@
       }
       t.id = editing.origId;
     } else t.id = uniqueId(t.name);
+    // Checked again just before writing: while a question above was open,
+    // another window may have saved a preset with a name that looks the same.
+    // Then this one is renamed, as for two saves at the same moment.
+    loadMine();
+    var preClash = '';
+    if (nameTaken(t.name, editing.origId)) {
+      var wasN = t.name, k0 = P.sameKey(wasN), other = all(Alpha.state.ds).filter(function (q) { return q.id !== editing.origId && P.sameKey(q.name) === k0; })[0];
+      t.name = uniqueName(wasN);
+      preClash = ' Another window saved a preset named "' + (other ? other.name : wasN) + '"' + (other && other.name !== wasN ? ', which looks the same as "' + wasN + '",' : '') + ' just now, so yours is now "' + t.name + '".';
+    }
     if (!saveOne(t)) {
       status = 'Not saved: this browser would not store the preset (its storage may be full). Your changes are still in the editor; "Download draft" keeps them as a file.';
       var st = dlg.querySelector('#pe-status'); st.textContent = status; announce(status, true); st.focus();
@@ -498,7 +531,7 @@
     }
     mySaves[t.id] = 1;
     justSaved[t.id] = { raw: store.raw(KEY + t.id), at: Date.now(), preset: JSON.parse(JSON.stringify(t)) };
-    var renamed = renameClashes(), clash = renamed.length ? ' ' + renamed.join(' ') : '';
+    var renamed = renameClashes(), clash = preClash + (renamed.length ? ' ' + renamed.join(' ') : '');
     if (renamed.length) { var now2 = find(Alpha.state.ds, t.id); if (now2) t.name = now2.name; }
     editing = null;
     status = memoryOnly ? 'Saved "' + t.name + '" for this visit only: this browser is not saving presets, so download it to keep it.' : 'Saved "' + t.name + '".' + clash;
@@ -563,6 +596,7 @@
       var got = restoreOld(act === 'old-restore-one' ? b.getAttribute('data-k') : null); loadMine(); Alpha.settings.notify();
       status = got.length ? 'Restored ' + got.length + ' preset' + (got.length === 1 ? '' : 's') + ' from the older version: ' +
           got.slice(0, 10).map(function (n) { return '"' + n + '"'; }).join(', ') + (got.length > 10 ? ' and ' + (got.length - 10) + ' more' : '') + '.'
+        : already ? 'Already in your list (restored or moved in another window); nothing was added.'
         : act === 'old-restore-one' && !gone ? 'Nothing could be restored (this browser\'s storage may be full).'
         : act === 'old-restore-one' ? 'That entry is no longer in the old list (another window changed it); nothing was restored. The list below is up to date.'
         : 'Nothing could be restored (this browser\'s storage may be full).';
@@ -778,5 +812,5 @@
     });
   }
 
-  Alpha.presetsUI = { init: init, open: open, all: all, find: find, warning: function (id) { return warns[id] || null; } };
+  Alpha.presetsUI = { init: init, open: open, all: all, find: find, warning: function (id) { return warns[id] || null; }, alike: function (id) { return alike[id] != null ? alike[id] : null; } };
 })(window.Alpha);
