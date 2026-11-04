@@ -96,6 +96,8 @@
     if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). ' +
       (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (the storage is full, or 20 earlier copies are already kept), so they are left as they are and changes are not saved.') + ' Check Settings.';
     if (notice) return notice;
+    var w = s && Alpha.presetsUI && Alpha.presetsUI.warning ? Alpha.presetsUI.warning(s.id) : null;
+    if (w) return 'The basket preset in use, "' + s.name + '", was saved by an older version and does not pass today\'s checks: ' + w + ' Edit it in Settings > Edit basket presets.';
     if (usable && !saved) return 'A change to the settings could not be saved (this browser\'s storage may be full). It lasts until the page is closed.';
     if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
     return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
