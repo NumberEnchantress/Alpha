@@ -20,7 +20,7 @@
   // product only, no package) is not an NDC column.
   var COLUMNS = {
     ndc: ['ndc', 'ndc11', 'ndccode', 'ndcnumber', 'ndc11code', 'packagendc', 'ndcpackagecode', 'itemndc', 'nationaldrugcode', 'ndcupc', '11digitndc', 'ndc11digit', 'ndc11digits'],
-    drug: ['drug', 'drugname', 'genericname', 'productname', 'itemname', 'itemdescription', 'drugdescription', 'productdescription', 'drugdesc', 'itemdesc', 'medication', 'medicationname', 'medname', 'description', 'name', 'product'],
+    drug: ['drug', 'drugname', 'labelname', 'genericname', 'productname', 'itemname', 'itemdescription', 'drugdescription', 'productdescription', 'drugdesc', 'itemdesc', 'medication', 'medicationname', 'medname', 'description', 'name', 'product'],
     strength: ['strength', 'str', 'drugstrength'],
     form: ['form', 'dosageform'],
     manufacturer: ['manufacturer', 'manufacturername', 'mfr', 'mfg', 'mfgname', 'labeler', 'labelername', 'maker'],
@@ -164,7 +164,7 @@
     // A title can name NDCs too ("NDC report 10/27/2026"): every such line in
     // the first 10 is tried, and the line and delimiter that agree best win.
     var starts = [];
-    for (var j = 0; j < Math.min(10, raw.length); j++) if (/\bndc\b/i.test(raw[j])) starts.push(j);
+    for (var j = 0; j < Math.min(10, raw.length); j++) if (/ndc/i.test(raw[j])) starts.push(j);
     if (!starts.length) starts.push(0);
     var best = ',', bestScore = -1;
     starts.forEach(function (hi) {
@@ -198,6 +198,7 @@
   // again at the next line, as if the lines before it were right, so one
   // refusal can name all the lines to fix.
   var QUOTE_CAP = 20000;
+  var XL_TEXT = /^\s*="[^"]*"\s*$/; // Excel's ="..." (a value kept as text)
   function quoteSyntax(t, delim) {
     var n = t.length, i = 0, line = 1, D = delim.charCodeAt(0), Q = 34, NL = 10, out = [], midQuote = false;
     var skipLine = function (why, at) {
@@ -233,10 +234,10 @@
         // probably lost, so its comma now splits it, and the count of values
         // can still match the header. Refused, not read as two values.
         // (Values with an even number of quotes, as Excel's ="99999-0001-01", are whole.)
-        else if (midQuote && /"\s*$/.test(f) && f.split('"').length % 2 === 0) {
-          skipLine('a value has a quote mark inside it and a later value ends with one (ATORVASTATIN"1,000 MG"). The delimiter before a quoted value may be missing, so the values on this line may be split in the wrong place. Check the line, and put the delimiter back before the opening quote', line);
+        else if (midQuote && /"\s*$/.test(f) && !XL_TEXT.test(f)) {
+          skipLine('a value has a quote mark inside it and a later value ends with one. Either the delimiter before a quoted value is missing (ATORVASTATIN"1,000 MG"), so the values on this line are split in the wrong place, or both are inch marks (TAPE 1", ..., cut to 2"); which one cannot be told. Put such values in quotes with the quote marks doubled ("TAPE 1""") or write in instead of ", or put the missing delimiter back', line);
         }
-        else if (f.indexOf('"') > 0 && f.split('"').length % 2 === 0) midQuote = true;
+        else if (f.indexOf('"') > 0 && !XL_TEXT.test(f)) midQuote = true;
       }
       if (i >= n) break;
       if (t.charCodeAt(i) === NL) { line++; midQuote = false; }
@@ -439,13 +440,13 @@
   var UOM = /^(ea|each|bx|box|bt|btl|bottle|ct|cnt|count|pk|pack|pkg|cs|case|ml|gm|g|gram|mg|mcg|ug|[µμ]g|meq|oz|l|lb|tab|tabs|tablet|tablets|cap|caps|capsule|capsules|packet|packets|pkt|amp|ampule|ampoule|syringe|syr|patch|patches|inhaler|supp|suppository|sachet|pouch|vl|vial|un|unit|units|tube|tb|kit|bag|pc|pcs)\.?$/i;
   // A cell that says a value is not known.
   // Excel's error values (#N/A from a lookup that found nothing) say the same.
-  var PLACEHOLDER = /^(n\/?a|none|tbd|pending|unknown|null|-+|\?+|#n\/a|#ref!|#value!|#name\?|#div\/0!|#null!|#num!|#n\/a n\/a)$/i;
+  var PLACEHOLDER = /^(n\/?a|none|tbd|pending|unknown|null|-+|\?+|#n\/a|#ref!|#value!|#name\?|#div\/0!|#null!|#num!|#n\/a n\/a|#spill!|#calc!|#getting_data|#blocked!|#field!|#unknown!|#connect!|#busy!)$/i;
   function blankCell(c) { return !String(c == null ? '' : c).trim(); }
   function importProducts(text, layout) {
     var p = parse(text), cols = mapColumns(p.fields), m = cols.map;
     var report = { rows: p.rows.length, imported: 0, split: 0, skipped: [], notes: [], fileNotes: (cols.choices || []).slice(), problem: null, fatal: false,
       columns: { used: m, unused: cols.unused, missing: [] } };
-    var products = [], seen = {}, lineOf = {}, firstPlace = {}, firstDrug = {};
+    var products = [], seen = {}, lineOf = {}, firstPlace = {}, firstDrug = {}, firstOther = {};
     var stop = function (msg) { report.problem = msg; report.fatal = true; return { products: [], lineOf: {}, report: report }; };
     if (p.empty) return stop('The file is empty.');
     if (p.problem) {
@@ -628,7 +629,7 @@
         // Excel's ' before a number (a shelf '3, a location '071) keeps it as text: the number.
         return c !== 'ndc' && /^'[\d.\-]+$/.test(v) ? v.slice(1) : v;
       };
-      var note = function (s) { report.notes.push({ row: line, ndc: get('ndc'), note: s }); };
+      var note = function (s, routine) { report.notes.push(routine ? { row: line, ndc: get('ndc'), note: s, routine: true } : { row: line, ndc: get('ndc'), note: s }); };
       var rawNdc = get('ndc');
       if (repeatHeader(row)) { report.skipped.push({ row: line, ndc: '', reason: 'a repeat of the header line' }); return; }
       var sp = splitAt(row);
@@ -639,16 +640,17 @@
       }
       if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
       var xl = ndcText(rawNdc);
-      if (xl.how) { note('NDC ' + rawNdc + ' read as ' + xl.value + ' (' + xl.how + ')'); rawNdc = xl.value; }
+      if (xl.how) { note('NDC ' + rawNdc + ' read as ' + xl.value + ' (' + xl.how + ')', true); rawNdc = xl.value; }
       var n = ndc.normalize(rawNdc);
       if (!n) { report.skipped.push({ row: line, ndc: rawNdc, reason: whyBadNdc(rawNdc) }); return; }
       if (seen[n]) {
         // Said when the duplicate gives another place: the first row is kept, so the other place is not used.
         var here = [get('location'), get('unit'), get('shelf')].join('|'), there = firstPlace[n];
         var otherDrug = firstDrug[n] != null && key(get('drug')) && key(get('drug')) !== firstDrug[n];
+        var fd = firstOther[n] || {}, others = ['strength', 'countPerBottle', 'form'].filter(function (c) { return key(get(c)) && fd[c] && key(get(c)) !== fd[c]; });
         report.skipped.push({ row: line, ndc: rawNdc, reason: 'duplicate of line ' + seen[n] + (otherDrug
           ? '; it names another drug ("' + get('drug').slice(0, 40) + '") than line ' + seen[n] + ', which was kept, so one of the two NDCs is probably wrong: check both lines'
-          : '') + (here !== there
+          : '') + (others.length ? '; it gives another ' + others.map(function (c) { return (c === 'countPerBottle' ? 'count' : c) + ' ("' + get(c).slice(0, 20) + '")'; }).join(' and ') + ' than line ' + seen[n] + ', which was kept: check which is right' : '') + (here !== there
           ? '; it gives another place (location ' + (get('location') || 'none') + (get('unit') ? ', unit ' + get('unit') : '') + ', shelf ' + (get('shelf') || 'none') + ') than line ' + seen[n] + ', which was kept: check which is right'
           : '') });
         return;
@@ -658,10 +660,15 @@
       if (PLACEHOLDER.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'no drug name (the cell says "' + drug + '")' }); return; }
       // A drug name with no letters ("060") is a value from another column: the row is shifted.
       if (!/\p{L}/u.test(drug)) { report.skipped.push({ row: line, ndc: rawNdc, reason: 'the drug name "' + drug.slice(0, 30) + '" has no letters, so the values are probably shifted (a missing or extra field) and cannot be matched to columns safely' }); return; }
-      seen[n] = line; lineOf[n] = line; firstPlace[n] = [get('location'), get('unit'), get('shelf')].join('|'); firstDrug[n] = key(drug);
+      seen[n] = line; lineOf[n] = line; firstPlace[n] = [get('location'), get('unit'), get('shelf')].join('|'); firstDrug[n] = key(drug); firstOther[n] = { strength: key(get('strength')), countPerBottle: key(get('countPerBottle')), form: key(get('form')) };
 
-      var prod = { ndc: n, drug: drug }, descCount = null;
+      var prod = { ndc: n, drug: drug }, descCount = null, semi = p.delimiter === ';';
       var strength = get('strength'), form = get('form');
+      // M3: a Strength column that disagrees with the strength in the description.
+      if (m.strength && strength) {
+        var ds2 = DESC.exec(drug);
+        if (ds2 && key(ds2[2]) !== key(strength)) { note('the description says "' + ds2[2].trim() + '" but the "' + m.strength + '" column says "' + strength + '"; strength left unknown'); strength = ''; }
+      }
       if (!m.strength) {
         var sm = DESC.exec(drug);
         if (sm && (/^\//.test(sm[3].trim()) || DESC.test(sm[3].trim()) || /\d\s*(mg|mcg|[µμ]g|ug|g|ml)\b/i.test(sm[3]))) {
@@ -671,28 +678,37 @@
         if (sm) {
           prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
           var rest = sm[3].trim(), restUsed = !form && !!rest;
-          // "TAB 1000 CT": the pack count is not part of the form.
-          var ct = /^(.*?)\s*\b(\d+)\s*(ct|cnt|count|ea|tablets|tabs|capsules|caps)\.?$/i.exec(rest);
-          if (restUsed && ct) {
-            rest = ct[1].trim(); restUsed = !!rest;
-            if (!get('countPerBottle')) { prod.countPerBottle = Number(ct[2]); note('"' + ct[2] + ' ' + ct[3] + '" in the description read as a count of ' + ct[2]); }
-            else descCount = { n: Number(ct[2]), text: ct[2] + ' ' + ct[3] };
+          // "TAB 1000 CT": the pack count is not part of the form. The number is
+          // taken whole ("2,500 CT", "1.000 CT") and read like the count column:
+          // "1.000" or "0" is not a count, so it is left unknown, with a note.
+          var ct = /^(.*?)\s*(?<![\d.,])(\d[\d.,]*)\s*(ct|cnt|count|ea|tablets|tabs|capsules|caps)\.?$/i.exec(rest);
+          if (ct) {
+            if (restUsed) { rest = ct[1].trim(); restUsed = !!rest; }
+            else rest = ct[1].trim();
+            var dc = int(ct[2], 1, semi), ctText = ct[2] + ' ' + ct[3];
+            if (dc.bad) note('"' + ctText + '" in the description ' + dc.bad + ', so the count from the description is not used');
+            else if (!get('countPerBottle')) { prod.countPerBottle = dc.value; note('"' + ctText + '" in the description read as a count of ' + dc.value, true); }
+            else descCount = { n: dc.value, text: ctText };
           }
           // A form is words ("TAB", "ER CAPSULE"); a bare number or a word plus a
           // number is not known to be one, so it is left out, with a note.
           var formOk = /^[\p{L}][\p{L}\s.\/-]*$/u.test(rest);
           if (restUsed && formOk) form = rest;
           report.split++;
-          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed && formOk ? ', form "' + form + '"' : '') +
-            (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : '') +
-            (rest && restUsed && !formOk ? '; "' + rest + '" not kept (not known to be the form)' : ''));
+          var leftOut = (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : '') +
+            (rest && restUsed && !formOk ? '; "' + rest + '" not kept (not known to be the form)' : '');
+          // (a routine note when nothing was left out: listed apart, so the notes to check stand out)
+          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed && formOk ? ', form "' + form + '"' : '') + leftOut, !leftOut);
         }
       }
-      if (strength && /^[\d.,]+$/.test(strength)) { note('strength "' + strength + '" has no unit (such as mg), so it may be a value from another column; strength left unknown'); strength = ''; }
+      if (strength && PLACEHOLDER.test(strength)) { note('strength "' + strength + '" read as not given'); strength = ''; }
+      else if (strength && !/[\p{L}%]/u.test(strength) && !/^\d+(\.\d+)?:\d+$/.test(strength)) { note('strength "' + strength + '" has no unit (such as mg), so it may be a value from another column; strength left unknown'); strength = ''; }
+      ['form', 'manufacturer', 'notes'].forEach(function (c) { if (get(c) && PLACEHOLDER.test(get(c))) note(c + ' "' + get(c) + '" read as not given'); });
+      if (form && PLACEHOLDER.test(form)) form = '';
       if (strength) prod.strength = strength;
       if (form) prod.form = form;
-      if (get('manufacturer')) prod.manufacturer = get('manufacturer');
-      if (get('notes')) prod.notes = get('notes');
+      if (get('manufacturer') && !PLACEHOLDER.test(get('manufacturer'))) prod.manufacturer = get('manufacturer');
+      if (get('notes') && !PLACEHOLDER.test(get('notes'))) prod.notes = get('notes');
 
       var loc = null, rawLoc = get('location'), unitInLoc = null;
       // "0" is what an Excel lookup gives for a blank cell, not a location.
@@ -749,7 +765,6 @@
       else if (loc) unitWhy = loc.code + ' has several units and none was given';
       else unitWhy = 'no known location';
 
-      var semi = p.delimiter === ';';
       var sh = int(get('shelf'), 1, semi);
       if (sh.bad) note('shelf "' + get('shelf') + '" ' + sh.bad + ' (shelves are numbered from 1 at the top); shelf left unknown');
       else if (sh.value != null) {

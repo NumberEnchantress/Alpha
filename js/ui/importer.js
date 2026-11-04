@@ -256,7 +256,7 @@
         var notApplied = !!rep.robotNotUsed && /^Neither/.test(rep.robotNotUsed); // read, but the other file was refused
         h += '<p><strong>' + esc(rep.productsFile) + '</strong>' + (notApplied ? ' (read, not applied)' : '') + ': ' + p.rows + (p.rows === 1 ? ' row read, <strong>' : ' rows read, <strong>') +
           p.imported + (notApplied ? ' would be imported' : ' imported') + '</strong>, ' +
-          p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
+          p.skipped.length + ' skipped, ' + noteRows(p.notes.filter(function (n) { return !n.routine; })) + ' with notes to check' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
         if (!p.imported) h += '<p class="note-bad">No rows could be imported, so the data in use was not changed.</p>';
         // Many rows left out: said plainly, before the tables (undo is below).
         else if (p.skipped.length * 10 > p.rows) h += '<p class="note-warn" data-testid="many-skipped">' + p.skipped.length + ' of ' + p.rows + ' rows were not imported. Check the reasons below before relying on this data' + (notApplied ? '.' : '; "Undo the last import" puts back the data in use before it.') + '</p>';
@@ -268,7 +268,9 @@
           (cols.unused.length ? '. Ignored: ' + cols.unused.map(function (u) { return '"' + esc(u) + '"'; }).join(', ') : '') +
           (cols.missing.length ? '. <strong>Not found: ' + cols.missing.map(esc).join(', ') + '</strong> (those stay unknown)' : '') + '.</p>';
         h += '<h4>Rows not imported</h4>' + table(p.skipped, [['row', 'Line'], ['ndc', 'NDC'], ['reason', 'Why']], 'None.');
-        h += '<h4>Imported, with notes</h4>' + table(p.notes, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
+        var check = p.notes.filter(function (n) { return !n.routine; }), routine = p.notes.filter(function (n) { return n.routine; });
+        h += '<h4>Imported, with notes to check</h4>' + table(check, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
+        if (routine.length) h += '<details><summary>How ' + routine.length + ' value' + (routine.length > 1 ? 's were' : ' was') + ' read (descriptions split, Excel text)</summary>' + table(routine, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']]) + '</details>';
       }
     }
     if (rep.robot) {
@@ -325,7 +327,9 @@
   // the outcome in the status line (a live region) for screen readers.
   function focusReport() {
     var r = document.getElementById('imp-report');
-    var said = lastReport && (lastReport.fileProblem || lastReport.storedNote);
+    var pr = lastReport && lastReport.products, rr = lastReport && lastReport.robot;
+    var refused = pr && pr.fatal ? 'Not imported: ' + pr.problem : rr && rr.fatal ? 'Robot list not used: ' + rr.problem : pr && !pr.imported && !pr.fatal ? 'No rows could be imported.' : '';
+    var said = lastReport && (lastReport.fileProblem || (refused ? String(refused).split('. ')[0] + '. ' : '') + (lastReport.storedNote || ''));
     if (said) setTimeout(function () { var st = document.getElementById('imp-status'); if (st) st.textContent = said; }, 60);
     if (r) { r.scrollIntoView({ block: 'start' }); r.focus(); return true; }
     return false;
