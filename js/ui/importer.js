@@ -31,8 +31,10 @@
   function keep(state) {
     memory = null;
     if (!store.set('imported', state)) {
-      memory = state; // blocked or too big: keep for this session
-      store.remove('imported'); // and never let an older saved import come back after a reload
+      // Never let an older saved import come back after a reload in its place;
+      // removing it may also make room for this one.
+      store.remove('imported');
+      if (!store.set('imported', state)) memory = state; // blocked or too big: keep for this session
     }
     return !memory;
   }
@@ -53,16 +55,21 @@
     });
   }
 
+  var busy = false;
   function doImport(el) {
-    var status = el.querySelector('#imp-status');
+    if (busy) return;
+    var status = el.querySelector('#imp-status'), go = el.querySelector('#imp-go');
     var prodIn = el.querySelector('#imp-products'), robotIn = el.querySelector('#imp-robot');
+    busy = true; if (go) go.disabled = true;
+    var done = function () { busy = false; if (go) go.disabled = false; };
     status.textContent = 'Reading…';
     Promise.all([readFile(prodIn), readFile(robotIn)]).then(function (files) {
       var pf = files[0], rf = files[1];
-      if (!pf && !rf) { status.textContent = 'Choose a products CSV, a robot list, or both.'; return; }
+      if (!pf && !rf) { done(); status.textContent = 'Choose a products CSV, a robot list, or both.'; return; }
       status.textContent = 'Importing… (a large file can take a few seconds)';
-      setTimeout(function () { run(pf, rf); }, 30); // let the status show before the work starts
+      setTimeout(function () { try { run(pf, rf); } finally { done(); } }, 30); // let the status show before the work starts
     }).catch(function (e) {
+      done();
       // A file that is not readable text gets a report of its own (it replaces the earlier one).
       lastReport = { when: new Date().toLocaleString(), fileProblem: e.message, storedNote: 'Nothing was changed: the data in use is the same as before this import.' };
       if (!store.set('importReport', lastReport)) store.remove('importReport');
@@ -161,6 +168,7 @@
     if (lastReport && !store.set('importReport', lastReport)) store.remove('importReport');
     Alpha.settings.reload();
     Alpha.settings.open();
+    focusReport();
   }
 
   function download() {
@@ -313,8 +321,15 @@
     });
   }
 
-  // After an import the dialog reopens; move focus to the report.
-  function focusReport() { var r = document.getElementById('imp-report'); if (r) { r.scrollIntoView({ block: 'start' }); r.focus(); return true; } return false; }
+  // After an import the dialog reopens; move focus to the report, and say
+  // the outcome in the status line (a live region) for screen readers.
+  function focusReport() {
+    var r = document.getElementById('imp-report');
+    var said = lastReport && (lastReport.fileProblem || lastReport.storedNote);
+    if (said) setTimeout(function () { var st = document.getElementById('imp-status'); if (st) st.textContent = said; }, 60);
+    if (r) { r.scrollIntoView({ block: 'start' }); r.focus(); return true; }
+    return false;
+  }
 
   Alpha.importer = { dataset: dataset, mount: mount, focusReport: focusReport, lastReport: function () { return lastReport; } };
 })(window.Alpha);
