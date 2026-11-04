@@ -77,7 +77,12 @@
     '\u02D7': '-', '\uA789': ':', '\u02B9': "'", '\u12D0': 'O', '\u2D4F': 'l', '\u2D54': 'O','\u222A': 'U', '\u2228': 'V', '\u13CF': 'b',
     // Arabic-Indic and Devanagari digits that look like Latin letters or digits; more letters and symbols
     '\u0661': 'l', '\u06F1': 'l', '\u0665': 'o', '\u06F5': 'o', '\u0667': 'V', '\u06F7': 'V', '\u06F0': 'o', '\u0660': 'o', '\u0966': 'o',
-    '\u042C': 'b', '\u0461': 'w', '\u2043': '-', '\u29F8': '/', '\u04BD': 'e', '\u01B7': '3', '\u2010': '-', '\u2011': '-'
+    '\u042C': 'b', '\u0461': 'w', '\u2043': '-', '\u29F8': '/', '\u04BD': 'e', '\u01B7': '3', '\u2010': '-', '\u2011': '-',
+    // zeros of other scripts; Hebrew, Arabic, Hangul and Han letters like l, o and -; bars, rings and lines
+    '\u09E6': 'o', '\u0E50': 'o', '\u0ED0': 'o', '\u0A66': 'o', '\u0AE6': 'o', '\u0C66': 'o', '\u0CE6': 'o', '\u0D66': 'o', '\u1040': 'o', '\u17E0': 'o',
+    '\u0B66': 'o', '\u0BE6': 'o', '\u0F20': 'o', '\u1810': 'o', '\u05E1': 'o', '\u3147': 'o', '\u25CB': 'o', '\u25E6': 'o', '\u2218': 'o', '\u26AC': 'o', '\u0D20': 'o',
+    '\u05D5': 'l', '\u05DF': 'l', '\u0627': 'l', '\u3163': 'l', '\u4E28': 'l', '\u3021': 'l', '\u2223': '|', '\u23D0': '|', '\u23AE': '|', '\u2502': '|', '\u2503': '|',
+    '\u2758': '|', '\u01C1': '|', '\uFFE8': '|', '\u4E00': '-', '\u2501': '-', '\u2574': '-', '\u2576': '-', '\u23AF': '-', '\u2E3A': '-', '\u201A': ',', '\u060C': ','
   };
   var IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
   // The form used to compare names and labels: compatibility forms folded
@@ -121,13 +126,20 @@
   var HIDDEN = /[\p{Cf}\p{Cn}\p{Co}]|(?![\t\n\r\f\v])\p{Cc}/u;
   function invisible(s) { if (!isStr(s)) return false; var t = s.replace(EMOJI, 'E').replace(JOINING, '$1'); return INVISIBLE.test(t) || HIDDEN.test(t); }
   // What is wrong with a piece of text that looks fine, or null.
+  var MIXED = 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters, or a Thai "๐" by an "O"), which can look like other text; type it again';
   function textProblem(s) {
     if (!isStr(s)) return null;
     if (invisible(s)) return 'contains invisible characters; type it again';
     if (/\p{Cs}/u.test(s)) return 'contains a broken character; type it again';
     if (/\p{M}{4,}/u.test(s)) return 'has a letter with too many accent marks';
+    // Latin letters with a letter or digit of any other script ("Lab \u0627",
+    // "Lab \u0E50"): many look like Latin letters or digits. (Text wholly in
+    // another script is fine, and so are Chinese, Japanese and Korean words
+    // beside Latin ones, as in "冷蔵 Fridge": their few look-alikes, such as
+    // "丨" and "ㅣ", are mapped above.)
+    if (/\p{Script=Latin}/u.test(s) && /(?=[\p{L}\p{Nd}])[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(s.normalize('NFKC'))) return MIXED;
     var scripts = [/\p{Script=Latin}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Armenian}/u, /\p{Script=Georgian}/u, /\p{Script=Cherokee}/u, /\p{Script=Coptic}/u, /\p{Script=Lisu}/u, /\p{Script=Canadian_Aboriginal}/u].filter(function (re) { return re.test(s); });
-    if (scripts.length > 1) return 'mixes letters from different alphabets (for example a Cyrillic "а" among Latin letters), which can look like other text; type it again';
+    if (scripts.length > 1) return MIXED;
     return null;
   }
   function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }
@@ -160,23 +172,50 @@
     if (d) h = max === c[0] ? 60 * (((c[1] - c[2]) / d) % 6) : max === c[1] ? 60 * ((c[2] - c[0]) / d + 2) : 60 * ((c[0] - c[1]) / d + 4);
     return [(h + 360) % 360, s, l];
   }
+  // Coloured emoji, by the standard colour word they show.
+  var EMOJI_COLOUR = {
+    '\u{1F534}': 'red', '\u{1F7E5}': 'red', '\u2764': 'red', '\u{1F7E0}': 'orange', '\u{1F7E7}': 'orange', '\u{1F9E1}': 'orange',
+    '\u{1F7E1}': 'yellow', '\u{1F7E8}': 'yellow', '\u{1F49B}': 'yellow', '\u{1F7E2}': 'green', '\u{1F7E9}': 'green', '\u{1F49A}': 'green',
+    '\u{1F535}': 'blue', '\u{1F7E6}': 'blue', '\u{1F499}': 'blue', '\u{1FA75}': 'blue', '\u{1F7E3}': 'purple', '\u{1F7EA}': 'purple', '\u{1F49C}': 'purple',
+    '\u26AB': 'black', '\u2B1B': 'black', '\u{1F5A4}': 'black', '\u26AA': 'white', '\u2B1C': 'white', '\u{1F90D}': 'white',
+    '\u{1F7E4}': 'brown', '\u{1F7EB}': 'brown', '\u{1F90E}': 'brown', '\u{1FA77}': 'pink', '\u{1FA76}': 'grey'
+  };
+  // Words in front of a colour word in names such as "darkred" or "lightseagreen".
+  var MODIFIERS = ['light', 'dark', 'deep', 'pale', 'hot', 'medium', 'bright', 'dim', 'dull', 'pastel', 'neon', 'royal', 'midnight', 'sea', 'steel', 'powder',
+    'dodger', 'cornflower', 'cadet', 'alice', 'lawn', 'spring', 'forest', 'lime', 'sky', 'slate', 'rosy', 'indian', 'misty', 'navy', 'lemon', 'dusty',
+    'baby', 'electric', 'true', 'pure', 'soft', 'vivid', 'very', 'web', 'mid', 'blood', 'cherry', 'fire', 'brick', 'olive', 'yellow', 'orange'];
   function wordMismatch(name, hex) {
-    // "DarkRed", "LightBlue": words joined in one are split at their capitals.
-    var words = sameKey(String(name).replace(/([a-z])([A-Z])/g, '$1 $2'), true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
+    // "DarkRed", "LightBlue": words joined in one are split at their capitals;
+    // a coloured emoji counts as its colour word.
+    var named = String(name).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\p{Extended_Pictographic}/gu, function (c) { return ' ' + (EMOJI_COLOUR[c] || '') + ' '; });
+    var words = sameKey(named, true).split(/[^a-z]+/).map(function (w) { return w.replace(/^gray/, 'grey'); });
+    // "lightblue", "darkred", "deepskyblue": leading modifiers are taken off,
+    // and a modifier that is itself a colour word ("sky", "slate") is kept as a word.
+    words = words.reduce(function (out, w) {
+      for (var again = true; again;) {
+        again = false;
+        for (var j = 0; j < MODIFIERS.length; j++) {
+          var m = MODIFIERS[j];
+          if (w.length > m.length + 2 && w.indexOf(m) === 0) { out.push(m); w = w.slice(m.length); again = true; break; }
+        }
+      }
+      out.push(w); return out;
+    }, []);
     // a word that is, or starts with, a colour word: "blue", "bluish", "reddish"
     var STEM = { black: 'black', white: 'white', grey: 'grey', yellow: 'yellow', blue: 'blu', red: 'red', green: 'green', orange: 'orang', purple: 'purpl', pink: 'pink' };
     // Other common colour words, by the standard colour they must look like.
+    // lavender: its usual colours lie in two families, so either fits.
     var ALSO = { crimson: 'red', scarlet: 'red', wine: 'red', coral: 'orange', grape: 'purple', sand: 'yellow', beige: 'white', ruby: 'red', maroon: 'red', burgundy: 'red', cherry: 'red', brick: 'red',
       navy: 'blue', azure: 'blue', cobalt: 'blue', sky: 'blue', teal: 'blue', turquois: 'blue', aqua: 'blue', cyan: 'blue', sapphire: 'blue',
       lime: 'green', mint: 'green', emerald: 'green', jade: 'green', forest: 'green', sage: 'green',
-      violet: 'purple', lavender: 'purple', lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
+      violet: 'purple', lavender: ['purple', 'blue'], lilac: 'purple', plum: 'purple', indigo: 'purple', mauve: 'purple',
       magenta: 'pink', fuchsia: 'pink', rose: 'pink', salmon: 'pink',
       gold: 'yellow', lemon: 'yellow', mustard: 'yellow', khaki: 'yellow', amber: 'orange', brown: 'orange', tan: 'orange', bronze: 'orange', copper: 'orange', rust: 'orange', peach: 'orange',
       charcoal: 'grey', slate: 'grey', silver: 'grey', ivory: 'white', cream: 'white', snow: 'white', ebony: 'black', jet: 'black', onyx: 'black' };
     // Olive lies between yellow and green: any hue from 40 to 170 degrees, not too dark or light.
     if (words.some(function (w) { return w.indexOf('olive') === 0; })) { var ov = hsl(hex); return !(ov[0] >= 40 && ov[0] < 170 && ov[1] >= 0.2 && ov[2] > 0.08 && ov[2] < 0.75); }
     var found = COLOUR_CHOICES.map(function (c) { return c.id; }).filter(function (id) {
-      return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return ALSO[a] === id && w.indexOf(a) === 0; }); });
+      return words.some(function (w) { return w.indexOf(STEM[id]) === 0 || Object.keys(ALSO).some(function (a) { return [].concat(ALSO[a]).indexOf(id) >= 0 && w.indexOf(a) === 0; }); });
     });
     if (found.length !== 1) return false; // none, or a mix such as "blue-green"
     var w = found[0], v = hsl(hex), h = v[0], s = v[1], l = v[2];
