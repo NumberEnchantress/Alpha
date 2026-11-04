@@ -47,7 +47,10 @@
     var q = $('q').value;
     var r = S.index.search(q, MAX_SHOWN);
     S.results = r.results;
-    S.active = S.results.length ? 0 : -1;
+    // A result found only by a different spelling may be another drug
+    // (hydralazine / hydroxyzine, prednisolone / prednisone): it is listed,
+    // marked, and chosen only with the arrow keys or a click.
+    S.active = S.results.length && !S.results[0].typo ? 0 : -1;
     renderResults(r, q);
     choose(S.active >= 0 ? S.results[0].product : null);
   }
@@ -60,7 +63,8 @@
       var cls = 'result' + (i < 3 ? ' top3' : '') + (i === 3 ? ' after-top3' : '');
       html += '<li id="r' + i + '" class="' + cls + '" role="option" aria-selected="' + (i === S.active) + '" data-i="' + i + '">' +
         '<span class="r-num">' + (i + 1) + '</span>' +
-        '<span class="r-name">' + esc(p.drug) + ' ' + ui.show(p.strength) + (p.form ? ' <span class="r-meta">' + esc(p.form) + '</span>' : '') + '</span>' +
+        '<span class="r-name">' + esc(p.drug) + ' ' + ui.show(p.strength) + (p.form ? ' <span class="r-meta">' + esc(p.form) + '</span>' : '') +
+          (S.results[i].typo ? ' <span class="r-typo">different spelling: check the name</span>' : '') + '</span>' +
         '<span class="r-meta"><span class="ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</span> · ' +
           (p.location != null ? esc(p.location) : 'location unknown') + ' · ' + ui.show(p.manufacturer) + '</span>' +
         '</li>';
@@ -78,6 +82,9 @@
       st = r.badCheck ? 'Barcode ' + q.trim() + ' fails its check digit: scan it again or type the NDC.'
         : r.badShape ? '“' + q.trim() + '” is not an NDC shape. Use 5-4-2, 4-4-2, 5-3-2 or 5-4-1, or the digits alone.'
         : r.complete ? 'No product with NDC ' + r.complete + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
+    } else if (S.results[0] && S.results[0].typo) {
+      st = 'No exact match for “' + q.trim() + '”. ' + (r.total === 1 ? 'A drug with a similar spelling is' : r.total + ' drugs with similar spellings are') +
+        ' listed: it may be a different drug. Check the name, then choose with ↓ or a click.';
     } else {
       st = r.total + (r.total === 1 ? ' match' : ' matches') + (r.total > 3 ? ', most used first' : '') +
         (r.total > MAX_SHOWN ? ' (showing ' + MAX_SHOWN + '; type more to narrow)' : '') + '.';
@@ -157,14 +164,20 @@
     else if (e.key === 'PageUp') { e.preventDefault(); move(-5); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      if (S.active < 0 && S.results.length) { S.active = 0; updateActive(); }
+      // (not a result found only by a different spelling: that needs ↓ or a click)
+      if (S.active < 0 && S.results.length && !S.results[0].typo) { S.active = 0; updateActive(); }
       if (S.active >= 0) { choose(S.results[S.active].product); showShelf(); }
       e.target.select(); // the next scan or typed search replaces the text
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.target.value = '';
       runSearch();
+      searchInView();
     }
+  }
+  // On a phone, Enter scrolled down to the shelf: Esc brings the search box back.
+  function searchInView() {
+    if (window.matchMedia && window.matchMedia('(max-width: 760px)').matches) window.scrollTo(0, 0);
   }
 
   function onGlobalKey(e) {
@@ -175,7 +188,7 @@
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === '?') { e.preventDefault(); $('help').showModal(); return; }
     if (e.key === ',') { e.preventDefault(); Alpha.settings.open(); return; }
-    if (e.key === 'Escape') { var q = $('q'); q.value = ''; runSearch(); q.focus(); return; }
+    if (e.key === 'Escape') { var q = $('q'); q.value = ''; runSearch(); q.focus(); searchInView(); return; }
     // Any printable key goes to the search box (so a barcode scan always lands there).
     // The old text is selected, so what is typed replaces it.
     if (e.key.length === 1 && e.key !== ' ') { var q = $('q'); q.focus(); q.select(); }

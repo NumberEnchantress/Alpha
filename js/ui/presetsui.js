@@ -20,6 +20,8 @@
   var warns = Object.create(null);
   // A stored preset whose name looks the same as an earlier one's: id -> that name.
   var alike = Object.create(null);
+  // The later of two (by storage key): the one a window renames when it saved it.
+  var alikeLater = Object.create(null);
   function alikeText(id) { return alike[id] != null ? 'Its name looks the same on screen as the preset "' + alike[id] + '". Rename one of them so they can be told apart.' : null; }
   var dlg = null, editing = null, status = '';
 
@@ -60,10 +62,17 @@
     ok.forEach(function (p) { var e = P.check(p); if (e.length) warns[p.id] = e[0]; });
     // Names that look the same as an earlier one (built in first, then by
     // storage key) stay usable but are said; a window renames its own.
-    alike = Object.create(null);
+    alike = Object.create(null); alikeLater = Object.create(null);
     var seen = Object.create(null);
     (ds0.basketSchemes || []).forEach(function (p) { seen[P.sameKey(p.name)] = P.clean(p.name); });
-    ok.forEach(function (p) { var sk = P.sameKey(p.name); if (seen[sk] != null) alike[p.id] = seen[sk]; else seen[sk] = P.clean(p.name); });
+    // (both are said, so the one in use shows it too; built-in names are kept)
+    var seenId = Object.create(null);
+    ok.forEach(function (p) {
+      var sk = P.sameKey(p.name);
+      if (seen[sk] == null) { seen[sk] = P.clean(p.name); seenId[sk] = p.id; return; }
+      alike[p.id] = seen[sk]; alikeLater[p.id] = seen[sk];
+      if (seenId[sk] && alike[seenId[sk]] == null) alike[seenId[sk]] = P.clean(p.name);
+    });
   }
   function isBroken(key) { return broken.some(function (b) { return b.key === key; }); }
 
@@ -208,11 +217,11 @@
     // Saved here with a name that looks the same as an earlier preset's
     // (another window saved it at the same moment): this one is renamed.
     mine.forEach(function (q) {
-      if (!mySaves[q.id] || alike[q.id] == null) return;
+      if (!mySaves[q.id] || alikeLater[q.id] == null) return;
       var p = null; try { p = JSON.parse(store.raw(KEY + q.id)); } catch (e) { p = null; }
       if (!p || typeof p.name !== 'string') return;
       var was = p.name; p.name = uniqueName(was);
-      if (p.name !== was && store.set(KEY + q.id, p)) out.push('Another window saved a preset named "' + alike[q.id] + '", which looks the same as "' + was + '", at the same moment, so yours is now "' + p.name + '".');
+      if (p.name !== was && store.set(KEY + q.id, p)) out.push('Another window saved a preset named "' + alikeLater[q.id] + '", which looks the same as "' + was + '", at the same moment, so yours is now "' + p.name + '".');
     });
     if (out.length) loadMine();
     return out;
@@ -460,7 +469,7 @@
   // new blank preset does not open with a list of errors.
   function showErrors() {
     var errs = P.check(inUse(editing.draft)), el = dlg.querySelector('#pe-errors');
-    if (nameTaken(editing.draft.name, editing.origId)) errs.unshift('Another preset already has this name.');
+    if (nameTaken(editing.draft.name, editing.origId)) errs.unshift('Another preset already has this name, or one that looks the same on screen.');
     var html = editing.tried || dirty() ? errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') : '';
     if (el.innerHTML !== html) el.innerHTML = html; // unchanged text is not announced again
     return errs;

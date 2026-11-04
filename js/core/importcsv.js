@@ -641,6 +641,23 @@
       return -1;
     }
 
+    if (m.drug && !m.strength) report.fileNotes.push('There is no Strength column, so every strength is unknown. Descriptions are kept whole as the drug name and still found by search ("atorvastatin 40" finds "ATORVASTATIN 40 MG TAB"); the strength and form are never read from a description, because one can also hold a package size, a second strength, a maker or a warning.');
+    // Columns whose other values are all numbers, or all text: a row with
+    // text in two of the one and numbers in the other has its values shifted
+    // (an unquoted comma and a missing value balance out), so it is not read.
+    var NUMERIC = /^\d[\d.\-\/]*$/, colNum = [], colTxt = [];
+    p.rows.forEach(function (row) { row.cells.forEach(function (c, i) { c = String(c == null ? '' : c).trim(); if (!c || PLACEHOLDER.test(c)) return; if (NUMERIC.test(c)) colNum[i] = (colNum[i] || 0) + 1; else colTxt[i] = (colTxt[i] || 0) + 1; }); });
+    function shiftedCols(row) {
+      var out = [];
+      row.cells.forEach(function (c, i) {
+        c = String(c == null ? '' : c).trim(); if (!c || PLACEHOLDER.test(c)) return;
+        var isNum = NUMERIC.test(c), oNum = (colNum[i] || 0) - (isNum ? 1 : 0), oTxt = (colTxt[i] || 0) - (isNum ? 0 : 1);
+        if (isNum && oTxt >= 2 && oNum === 0) out.push({ i: i, way: 'num' });
+        else if (!isNum && oNum >= 2 && oTxt === 0) out.push({ i: i, way: 'txt' });
+      });
+      var ways = {}; out.forEach(function (x) { ways[x.way] = 1; });
+      return ways.num && ways.txt ? out.map(function (x) { return x.i; }) : [];
+    }
     p.rows.forEach(function (row) {
       var r = row.data, line = row.line;
       // Excel's ="..." (a value kept as text) is the text inside, in any column
@@ -665,6 +682,8 @@
           '" starts with a space, unlike the rest of that column. With the right field count, that is what an unquoted comma inside a value leaves when another value in the row is missing (the values between are shifted), so the row is not imported. If the export pads values with spaces, remove the spaces and import again' });
         return;
       }
+      var sh = shiftedCols(row);
+      if (sh.length >= 2) { report.skipped.push({ row: line, ndc: String(rawNdc).slice(0, 30), reason: 'its values look shifted between columns: ' + sh.map(function (i) { return '"' + (p.fields[i] || 'column ' + (i + 1)) + '" is "' + String(row.cells[i]).trim().slice(0, 20) + '"'; }).join(' and ') + ', unlike every other row (an unquoted comma inside a value with a value missing elsewhere does that), so the row was not read' }); return; }
       if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
       var xl = ndcText(rawNdc);
       if (xl.how) { note('NDC ' + rawNdc + ' read as ' + xl.value + ' (' + xl.how + ')', true); rawNdc = xl.value; }
@@ -698,33 +717,15 @@
         var ds2 = DESC_ANY.exec(drug);
         if (ds2 && strengthKey(ds2[2]) !== strengthKey(strength)) { note('the description says "' + ds2[2].trim() + '" but the "' + m.strength + '" column says "' + strength + '"; strength left unknown'); strength = ''; }
       }
-      if (!m.strength) {
-        var sm = DESC.exec(drug);
-        if (sm && (/^\//.test(sm[3].trim()) || DESC.test(sm[3].trim()) || /\d\s*(mg|mcg|[µμ]g|ug|g|ml)\b/i.test(sm[3]))) {
-          note('"' + drug + '" looks like a combination product, so it was not split into drug and strength');
-          sm = null;
-        }
-        if (sm) {
-          prod.drug = sm[1].trim().replace(/[,;\s]+$/, ''); strength = sm[2].trim();
-          var rest = sm[3].trim(), restUsed = !form && !!rest;
-          // "TAB 1000 CT": the pack count is not part of the form. The number is
-          // taken whole ("2,500 CT", "1.000 CT") and read like the count column:
-          // "1.000" or "0" is not a count, so it is left unknown, with a note.
-          var ct = PACK.exec(rest);
-          if (ct) { rest = rest.slice(0, ct.index).trim(); if (restUsed) restUsed = !!rest; }
-          // A form is words ("TAB", "ER CAPSULE"); a bare number or a word plus a
-          // number is not known to be one, so it is left out, with a note.
-          var formOk = /^[\p{L}][\p{L}\s.\/-]*$/u.test(rest);
-          if (restUsed && formOk) form = rest;
-          report.split++;
-          var leftOut = (rest && !restUsed ? '; "' + rest + '" not kept because the Form column is used' : '') +
-            (rest && restUsed && !formOk ? '; "' + rest + '" not kept (not known to be the form)' : '');
-          // (a routine note when nothing was left out: listed apart, so the notes to check stand out)
-          note('"' + drug + '" read as drug "' + prod.drug + '", strength "' + strength + '"' + (restUsed && formOk ? ', form "' + form + '"' : '') + leftOut, !leftOut);
-        }
-      }
+      // Version-39: a description is never split into drug, strength and form.
+      // It can hold a package size ("CREAM 30 G"), a second strength in
+      // another unit ("0.25-35 MG-MCG"), a maker ("10 MG LUPIN") or a
+      // warning, and six grades in a row found a new way the splitting read
+      // one of them as the strength or form. The description stays whole as
+      // the drug name (search still finds "atorvastatin 40" in it); strength
+      // and form come only from their own columns, else they are unknown.
       if (strength && PLACEHOLDER.test(strength)) { note('strength "' + strength + '" read as not given'); strength = ''; }
-      else if (strength && /\d[.,]\d{3}(?!\d)|\d,\d{1,2}(?!\d)/.test(strength)) { note('strength "' + strength + '" has a mark that may be a decimal point or a thousands mark (1.000 can be 1 or 1000), so it cannot be read safely; strength left unknown'); strength = ''; }
+      else if (strength && /(?<![\d.,])[1-9]\d{0,2}[.,]\d{3}(?!\d)|\d,\d{1,2}(?!\d)/.test(strength)) { note('strength "' + strength + '" has a mark that may be a decimal point or a thousands mark (1.000 can be 1 or 1000), so it cannot be read safely; strength left unknown'); strength = ''; }
       else if (strength && !/[\p{L}%]/u.test(strength) && !/^\d+(\.\d+)?:\d+$/.test(strength)) { note('strength "' + strength + '" has no unit (such as mg), so it may be a value from another column; strength left unknown'); strength = ''; }
       ['form', 'manufacturer', 'notes'].forEach(function (c) { if (get(c) && PLACEHOLDER.test(get(c))) note(c + ' "' + get(c) + '" read as not given'); });
       if (form && PLACEHOLDER.test(form)) form = '';
@@ -796,15 +797,15 @@
         else prod.shelf = sh.value;
       }
 
-      var cnt = int(get('countPerBottle'), 1, semi);
+      var cnt = PLACEHOLDER.test(get('countPerBottle')) ? (note('count "' + get('countPerBottle') + '" read as not given'), { value: null }) : int(get('countPerBottle'), 1, semi);
       if (cnt.bad) note('count "' + get('countPerBottle') + '" ' + cnt.bad + '; left unknown');
       else if (cnt.value != null && descCount && descCount.n != null && descCount.n !== cnt.value) note('count ' + cnt.value + ' in the "' + m.countPerBottle + '" column, but the description says "' + descCount.text + '"; count left unknown');
       else if (cnt.value != null && descCount && descCount.n == null) { prod.countPerBottle = cnt.value; note('the description also gives a pack size ("' + descCount.text + '") that cannot be read safely; check the count ' + cnt.value + ' from the "' + m.countPerBottle + '" column'); }
       else if (cnt.value == null && descCount && !get('countPerBottle')) note('the description gives a pack size ("' + descCount.text + '"); counts are read only from a count column, so the count is left unknown', true);
       // A "Pack Size" column for a liquid, cream or powder ("SOLUTION 473 ML",
       // 473) holds the bottle or tube size, not a count of units (version-38).
-      else if (cnt.value != null && !/count/.test(key(m.countPerBottle)) && /\d\s*(ml|l|g|gm|grams?|oz|fl\.?\s*oz)\b/i.test(get('drug')) && !/\b(tab|tabs|tablets?|caps?|capsules?)\b/i.test(get('drug')))
-        note('"' + m.countPerBottle + '" is ' + cnt.value + ', but the description gives a volume or weight ("' + get('drug').slice(0, 60) + '"), so the number may be the package size, not a count; count left unknown');
+      else if (cnt.value != null && !/count/.test(key(m.countPerBottle)) && /\d\s*(ml|l|g|gm|grams?|oz|fl\.?\s*oz)\b|\b(syrup|solution|soln|susp|suspension|cream|crm|ointment|oint|gel|lotion|liquid|elixir|spray|drops|inhaler|powder|foam|shampoo|paste)\b/i.test([get('drug'), get('strength'), get('form')].join(' ')) && !/\b(tab|tabs|tablets?|caps?|capsules?|needles?|syringes?|lancets?)\b/i.test([get('drug'), get('form')].join(' ')))
+        note('"' + m.countPerBottle + '" is ' + cnt.value + ', but the product is a liquid, cream or powder ("' + [get('drug'), get('strength'), get('form')].filter(Boolean).join(', ').slice(0, 60) + '"), so the number may be the package size, not a count; count left unknown');
       else if (cnt.value != null) prod.countPerBottle = cnt.value;
       var rk = int(get('rank'), 1, semi);
       if (rk.bad) note('rank "' + get('rank') + '" ' + rk.bad + '; left unknown');
@@ -826,7 +827,8 @@
         else if (v.value != null) { vial[d] = v.value; nums++; }
       });
       if (nas && (nums || bads)) note('vial sizes mix "n/a" with other values; vial capacity left unknown');
-      else if (nas) prod.vialCapacity = 'n/a';
+      else if (nas === 3) prod.vialCapacity = 'n/a';
+      else if (nas) note('vial sizes: "n/a" in only ' + (nas === 1 ? 'one' : 'two') + ' of the three vial columns; vial capacity left unknown');
       else if (nums) prod.vialCapacity = vial;
 
       products.push(prod);
