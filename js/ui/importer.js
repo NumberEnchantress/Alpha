@@ -124,7 +124,7 @@
       undoState = { prev: prevState || null };
       if (!store.set('importUndo', undoState)) store.remove('importUndo');
       report.canUndo = true;
-      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes, and an import saved earlier was removed from this browser so it cannot come back in its place. Use "Download as data file" to keep it.';
+      report.storedNote = ok ? 'Saved in this browser.' : 'This browser would not save it (blocked or too large); it will be gone when the page closes' + (prevState ? ', and the import saved earlier was removed from this browser so it cannot come back in its place' : '') + '. Use "Download as data file" to keep it.';
     } else {
       report.storedNote = 'Nothing was changed: the data in use is the same as before this import.';
     }
@@ -151,9 +151,14 @@
     focusReport();
   }
 
+  // Back to the store's own data; can be undone like an import (one step).
   function stop() {
-    memory = null; store.remove('imported'); store.remove('importReport'); lastReport = null;
-    undoState = null; store.remove('importUndo');
+    var was = saved();
+    memory = null; store.remove('imported'); store.remove('importReport');
+    undoState = was ? { prev: was } : null;
+    if (!undoState || !store.set('importUndo', undoState)) store.remove('importUndo');
+    lastReport = was ? { when: new Date().toLocaleString(), storedNote: 'Stopped using the imported data (' + was.source + '); the store\'s own data is in use.' } : null;
+    if (lastReport && !store.set('importReport', lastReport)) store.remove('importReport');
     Alpha.settings.reload();
     Alpha.settings.open();
   }
@@ -245,6 +250,8 @@
           p.imported + (notApplied ? ' would be imported' : ' imported') + '</strong>, ' +
           p.skipped.length + ' skipped, ' + noteRows(p.notes) + ' with notes' + (p.split ? ', ' + p.split + ' descriptions split into drug and strength' : '') + '.</p>';
         if (!p.imported) h += '<p class="note-bad">No rows could be imported, so the data in use was not changed.</p>';
+        // Many rows left out: said plainly, before the tables (undo is below).
+        else if (p.skipped.length * 10 > p.rows) h += '<p class="note-warn" data-testid="many-skipped">' + p.skipped.length + ' of ' + p.rows + ' rows were not imported. Check the reasons below before relying on this data' + (notApplied ? '.' : '; "Undo the last import" puts back the data in use before it.') + '</p>';
       }
       h += encodingNote(rep.productsEncoding) +
         (p.fileNotes || []).map(function (n) { return '<p class="note-warn small">' + esc(n) + '</p>'; }).join('');
@@ -278,7 +285,7 @@
   var REPORT_BTN = '<p><button type="button" class="btn small" data-act="report-csv">Download the report (CSV)</button></p>';
   function undoBtn(rep) {
     // Offered while the import it would undo is the one in use (also after a refused import, which changed nothing).
-    return undoInfo() && !rep.undone ? '<p><button type="button" class="btn small" data-act="import-undo">Undo this import</button> <span class="small muted">puts back the data in use before it' + (store.raw('importUndo') == null ? ' (until the page is closed)' : '') + '</span></p>' : '';
+    return undoInfo() && !rep.undone ? '<p><button type="button" class="btn small" data-act="import-undo">' + (/^Stopped/.test(rep.storedNote || '') ? 'Use the imported data again' : 'Undo the last import') + '</button> <span class="small muted">puts back the data in use before ' + (/^Stopped/.test(rep.storedNote || '') ? 'you stopped' : 'the last import that changed it') + (store.raw('importUndo') == null ? ' (until the page is closed)' : '') + '</span></p>' : '';
   }
 
   function mount(el) {
