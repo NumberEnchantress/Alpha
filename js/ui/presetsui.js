@@ -478,11 +478,22 @@
   /* ---------- actions ---------- */
   function startEdit(p, origId) {
     var d = JSON.parse(JSON.stringify(p));
+    standardColours(d);
     d.groups.forEach(function (g) { g.own = false; });
     // base: the stored text when editing began, to notice a save from another window.
     editing = { origId: origId, draft: d, start: JSON.stringify(strip(d)), base: origId ? store.raw(KEY + origId) : null };
     status = '';
     render('#pe-name');
+  }
+
+  function standardColours(d) {
+    var std = function (name) { var n = P.clean(name).toLowerCase(); return P.COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0]; };
+    var map = Object.create(null), taken = Object.create(null);
+    d.colours.forEach(function (c) { var s = std(c.name); if (s && !taken[s.id]) { taken[s.id] = 1; map[c.id] = s.id; } });
+    if (!Object.keys(map).length) return;
+    d.colours = d.colours.map(function (c) { var s = map[c.id] && std(c.name); return s ? { id: s.id, name: s.name, hex: s.hex } : c; })
+      .filter(function (c, i, all) { return all.findIndex(function (x) { return x.id === c.id; }) === i; });
+    d.groups.forEach(function (g) { g.baskets = g.baskets.map(function (b) { return map[b] || b; }); });
   }
 
   function blankPreset() {
