@@ -35,6 +35,9 @@
   function labelBox(r) { return r; }
 
   function unitLabel(loc, unit) {
+    // A label for the map only: shorter ("OTC" for "OTC 1"), or empty for the
+    // later sections of a run that is labelled once.
+    if (unit.mapLabel != null) return unit.mapLabel;
     if (loc.units.length === 1) return unit.label || loc.code; // a short label ("86" for 086) when the data gives one
     return unit.label || unit.id;
   }
