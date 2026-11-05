@@ -391,6 +391,9 @@
   function render(focusSel) {
     if (focusSel === '#pe-status') ownStatusAt = Date.now();
     var ds = Alpha.state.ds;
+    // The file picker is kept across redraws: a file being chosen while
+    // another window changes presets (which redraws this page) still loads.
+    var keepFile = body().querySelector('#pe-file');
     body().innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
@@ -418,6 +421,8 @@
       '<p id="pe-status" class="small" tabindex="-1">' + esc(status) + '</p>' +
       (editing ? editorHtml(ds) : '') +
       '<div class="dialog-actions"><button type="button" class="btn" data-act="close">Close</button></div>';
+    var newFile = body().querySelector('#pe-file');
+    if (keepFile && newFile) newFile.replaceWith(keepFile);
     if (editing) showErrors();
     var f = focusSel && dlg.querySelector(focusSel);
     if (f) f.focus();

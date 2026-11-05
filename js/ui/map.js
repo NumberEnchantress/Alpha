@@ -31,10 +31,10 @@
     return { x: x0, y: y0, w: Math.max.apply(null, xs) - x0, h: Math.max.apply(null, ys) - y0 };
   }
   // A turned rect's label is sized for the rect as drawn, set level.
-  function labelBox(r) { return r.rot ? { x: r.x, y: r.y, w: r.w, h: r.h } : r; }
+  function labelBox(r) { return r; }
 
   function unitLabel(loc, unit) {
-    if (loc.units.length === 1) return loc.code;
+    if (loc.units.length === 1) return unit.label || loc.code; // a short label ("86" for 086) when the data gives one
     return unit.label || unit.id;
   }
 
@@ -44,20 +44,29 @@
     var w = vertical(r) ? r.h : r.w, h = vertical(r) ? r.w : r.h;
     // Fit the label in the box, but never smaller than 2 (scaled) floor units.
     var byW = w / Math.max(2.2, text.length * 0.6), byH = h * 0.7;
-    return Math.max(2 * k, Math.min(3.6 * k, byW, byH));
+    return Math.max(2 * k, Math.min(2.6 * k, byW, byH));
   }
   // The space a label takes (bold text is about 0.62 em a character, wide
   // letters such as W, M, @ and Æ about 1 em); a label can be wider than its
   // box, and the EST. tag must not cover it.
   var textBoxes = [];
   function textWidth(text) { return Alpha.ui.textEm(text); }
+  // The angle a label is drawn at: along the box's long side, turned with a
+  // turned box, and never upside down (kept between -90 and 90 degrees).
+  function textAngle(r) {
+    var a = (r.rot || 0) - (vertical(r) ? 90 : 0);
+    while (a <= -90) a += 180;
+    while (a > 90) a -= 180;
+    return a;
+  }
   function label(r, text) {
-    var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text);
+    var cx = r.x + r.w / 2, cy = r.y + r.h / 2, f = fontFor(r, text), a = textAngle(r);
     if (f < minFont) minFont = f;
     var tw = textWidth(text) * f, th = f * 1.15, v = vertical(r);
-    textBoxes.push({ x: cx - (v ? th : tw) / 2, y: cy - (v ? tw : th) / 2, w: v ? th : tw, h: v ? tw : th });
+    // (a turned label: the level box its rect covers, which holds it)
+    textBoxes.push(r.rot ? bbox(r) : { x: cx - (v ? th : tw) / 2, y: cy - (v ? tw : th) / 2, w: v ? th : tw, h: v ? tw : th });
     return '<text x="' + cx + '" y="' + cy + '" font-size="' + f + '"' +
-      (vertical(r) ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '') + '>' + esc(text) + '</text>';
+      (a ? ' transform="rotate(' + a + ' ' + cx + ' ' + cy + ')"' : '') + '>' + esc(text) + '</text>';
   }
 
   function init(container, lay) {
