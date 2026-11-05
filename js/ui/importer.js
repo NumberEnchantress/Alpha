@@ -17,7 +17,7 @@
   // The dataset the import builds on: the built-in data if present, else the sample.
   function base() {
     var sets = window.ALPHA_DATASETS || {};
-    return sets.real || sets.sample;
+    return sets.real || sets.sim || sets.sample;
   }
 
   function dataset() {
