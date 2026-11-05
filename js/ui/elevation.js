@@ -76,6 +76,17 @@
     for (var i = 0; i < old.length; i++) old[i].classList.remove('shelf-hi', 'shelf-est');
     var labels = svg.querySelectorAll('.s-label, .s-est');
     for (var j = 0; j < labels.length; j++) labels[j].parentNode.removeChild(labels[j]);
+    if (loc.browse) {
+      svg.setAttribute('aria-label', svg.getAttribute('data-base-label') + (loc.unit.range ? '. Holds ' + loc.unit.range.from + ' to ' + loc.unit.range.to : ''));
+      (loc.unit.shelfRanges || []).forEach(function (rg, k) {
+        var row = svg.querySelector('.shelf[data-shelf="' + (k + 1) + '"]');
+        if (!row) return;
+        var yy = Number(row.getAttribute('data-y')), hh = Number(row.getAttribute('data-h')), t1 = trim(rg.from === rg.to ? rg.from : rg.from + ' – ' + rg.to, 34);
+        var f1 = Math.min(4.6, hh * 0.5, 80 / Math.max(Alpha.ui.textEm(t1), 5));
+        if (!svg.__scale || f1 * svg.__scale >= MIN_PX) row.appendChild(text('s-label', yy + hh / 2, f1, t1));
+      });
+      return true;
+    }
     svg.setAttribute('aria-label', svg.getAttribute('data-base-label') + (loc.shelf == null ? '. Shelf unknown' : ''));
     if (loc.shelf == null) return true;
     var g = svg.querySelector('.shelf[data-shelf="' + loc.shelf + '"]');
@@ -106,6 +117,7 @@
   function trim(s, max) { return s.length > max ? s.slice(0, max - 1) + '…' : s; }
 
   function caption(loc) {
+    if (loc.browse) return { cls: '', text: loc.unit.shelves + ' shelves, numbered from the top. ' + (loc.unit.range ? 'Holds ' + loc.unit.range.from + ' – ' + loc.unit.range.to + ' by name. ' : '') + 'Search for a drug to see its shelf.' };
     if (loc.shelfStatus === 'known') return { cls: '', text: 'Shelf ' + loc.shelf + ' of ' + loc.unit.shelves + ', counting from the top' };
     if (loc.shelfStatus === 'estimated') {
       return { cls: 'estimated', text: 'Shelf ≈' + loc.shelf + ' of ' + loc.unit.shelves + ' from the top. ESTIMATED from the alphabetical range: check nearby shelves.' };
@@ -114,7 +126,7 @@
   }
 
   function render(el, loc, p) {
-    if (!p) { el.innerHTML = '<p class="elev-msg">Choose a product to see its shelf.</p>'; return; }
+    if (!p && !(loc && loc.browse)) { el.innerHTML = '<p class="elev-msg">Choose a product to see its shelf, or a section on the map.</p>'; return; }
     if (!loc.location) {
       el.innerHTML = loc.code != null
         ? '<p class="elev-msg"><strong>' + esc(loc.code) + ' is not on the map yet.</strong> The layout has no location with that code.</p>'
@@ -131,7 +143,7 @@
     if (loc.shelfStatus === 'none') {
       var robot = loc.location.kind === 'robot';
       el.innerHTML = header(loc) + '<div class="elev-robot">' + esc(loc.unit.label || loc.location.code) + '</div>' +
-        '<p class="elev-caption">' + (robot ? 'No shelf: this NDC is filled by the robot.' : 'This unit has no shelves.') + '</p>';
+        '<p class="elev-caption">' + (robot ? (loc.browse ? 'No shelves: the robot fills the NDCs it holds.' : 'No shelf: this NDC is filled by the robot.') : 'This unit has no shelves.') + '</p>';
       return;
     }
     var c = caption(loc);

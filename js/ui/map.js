@@ -12,6 +12,7 @@
   var minFont = Infinity, minW = 0, minH = 0, mapRO = null, box = null, focus = null;
   var el = null, svg = null, layout = null, marker = null, markerEst = null, markerRing = null, title = null, lastHi = [];
   var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
+  var unitOrder = [];
 
   // A rect may be turned (rect.rot, degrees clockwise about its centre), for
   // shelving set at an angle. Its face (N, E, S, W) is a side of the turned
@@ -87,7 +88,8 @@
     lay.locations.forEach(function (loc) {
       loc.units.forEach(function (u) {
         var r = u.rect, text = unitLabel(loc, u);
-        parts.push('<g class="unit kind-' + esc(loc.kind) + '" data-loc="' + esc(loc.code) + '" data-unit="' + esc(u.id) + '">' +
+        parts.push('<g class="unit kind-' + esc(loc.kind) + '" data-loc="' + esc(loc.code) + '" data-unit="' + esc(u.id) + '" role="button" tabindex="-1" aria-label="' +
+          esc('Show ' + loc.code + (loc.units.length > 1 ? ' ' + (u.label || u.id) : '') + (loc.name && loc.name !== loc.code ? ', ' + loc.name : '') + ' in the shelf view') + '">' +
           '<g' + turned(r) + '><rect class="u-box" x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '"/>' +
           faceLine(u) + '</g>' +
           label(labelBox(r), text) +
@@ -102,6 +104,27 @@
     parts.push('</svg>');
     el.innerHTML = parts.join('');
     svg = el.firstChild;
+    // Click, tap, or Enter / Space on a section shows it in the shelf view.
+    // The map is one stop for Tab; the arrow keys move between sections.
+    var units = svg.querySelectorAll('g.unit');
+    if (units.length) units[0].setAttribute('tabindex', '0');
+    // The order the arrow keys follow: as drawn at first (a highlighted
+    // section is moved to the end of the drawing to sit on top).
+    unitOrder = Array.prototype.slice.call(units);
+    if (!el.__picks) {
+      el.__picks = true;
+      el.addEventListener('click', function (e) { var g = e.target.closest && e.target.closest('g.unit'); if (g) pick(g); });
+      el.addEventListener('keydown', function (e) {
+        var g = e.target.closest && e.target.closest('g.unit');
+        if (!g) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); pick(g); return; }
+        var d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        if (!d) return;
+        e.preventDefault(); e.stopPropagation();
+        var all = unitOrder, i = all.indexOf(g), next = all[(i + d + all.length) % all.length];
+        g.setAttribute('tabindex', '-1'); next.setAttribute('tabindex', '0'); next.focus();
+      });
+    }
     marker = el.querySelector('#map-marker');
     markerEst = marker.querySelector('.marker-est');
     markerRing = marker.querySelector('.marker-ring');
@@ -161,8 +184,11 @@
         g.classList.add(loc.unitStatus === 'estimated' ? 'unit-est' : 'unit-hi');
       }
     }
-    // Draw highlighted units last so their outlines sit on top.
+    // Draw highlighted units last so their outlines sit on top. (Moving a
+    // focused section drops its focus, so a section chosen by key keeps it.)
+    var hadFocus = document.activeElement;
     lastHi.forEach(function (g) { g.parentNode.insertBefore(g, marker); });
+    if (hadFocus && lastHi.indexOf(hadFocus) >= 0 && document.activeElement !== hadFocus) try { hadFocus.focus({ preventScroll: true }); } catch (e) { /* older browsers */ }
     var where = L.code + (L.name && L.name !== L.code ? ' · ' + L.name : '');
     if (L.units.length > 1) {
       where += loc.unit ? ' · ' + (loc.unit.label || loc.unit.id) + (loc.unitStatus === 'estimated' ? ' (estimated)' : '') : ' · which unit: unknown';
@@ -228,6 +254,14 @@
       if (!hit) return TAG_SPOTS[i];
     }
     return null;
+  }
+
+  // The section a click, tap or key chose: it keeps the one Tab stop, and the app is told.
+  function pick(g) {
+    var all = svg.querySelectorAll('g.unit');
+    for (var i = 0; i < all.length; i++) all[i].setAttribute('tabindex', all[i] === g ? '0' : '-1');
+    if (document.activeElement !== g) try { g.focus({ preventScroll: true }); } catch (e) { /* older browsers */ }
+    if (Alpha.map.onPick) Alpha.map.onPick(g.getAttribute('data-loc'), g.getAttribute('data-unit'));
   }
 
   function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }

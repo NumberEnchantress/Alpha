@@ -295,3 +295,12 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .baskets li, .baskets strong, .pg, .preset-name, .preset-groups { overflow-wrap: anywhere; }
 .pg { white-space: normal; }
 .basket-names { overflow-wrap: anywhere; white-space: normal; }
+/* A map section can be chosen (click, tap, Enter): it shows in the shelf view. */
+.map g.unit { cursor: pointer; }
+.map g.unit:focus { outline: none; }
+.map g.unit:focus .u-box { stroke: var(--accent); stroke-width: 4px; }
+.map g.unit:focus-visible .u-box { stroke: var(--accent); stroke-width: 5px; stroke-dasharray: none; }
+.browse-title { font-size: 1.1rem; margin: 0 0 .4rem; }
+.browse-list { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.browse-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; }
+.browse-list .ndc { font-family: var(--mono); }

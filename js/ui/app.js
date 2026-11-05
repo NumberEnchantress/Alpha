@@ -214,8 +214,32 @@
     Alpha.warmed = true;
   }
 
+  /* ---------- a section chosen on the map ---------- */
+  // The shelf view shows it with nothing highlighted, and the info pane
+  // lists what it holds (each one chooses that product).
+  function browse(code, unitId) {
+    var L = S.ds.layout.locations.filter(function (l) { return l.code === code; })[0];
+    if (!L) return;
+    var U = L.units.filter(function (u) { return u.id === unitId; })[0] || L.units[0];
+    S.product = null; S.active = -1; updateActive(false);
+    var loc = { location: L, unit: U, unitStatus: 'known', shelf: null, shelfStatus: U.shelves ? 'unknown' : 'none', browse: true, code: code };
+    Alpha.map.show(loc);
+    Alpha.elevation.render($('elev'), loc, null);
+    var here = S.ds.products.filter(function (p) { return p.location === code && Alpha.locate.locate(p, S.ds.layout).unit === U; })
+      .sort(function (a, b) { return Alpha.locate.alphaKey(a.drug) < Alpha.locate.alphaKey(b.drug) ? -1 : Alpha.locate.alphaKey(a.drug) > Alpha.locate.alphaKey(b.drug) ? 1 : 0; });
+    var name = L.code + (L.name && L.name !== L.code ? ' · ' + L.name : '') + (L.units.length > 1 ? ' · ' + (U.label || U.id) : '');
+    var MAX = 60, shown = here.slice(0, MAX);
+    $('info').innerHTML = '<h2 class="browse-title">' + esc(name) + '</h2>' +
+      '<p>' + (here.length ? here.length + (here.length === 1 ? ' product is' : ' products are') + ' placed here' + (here.length > MAX ? ' (the first ' + MAX + ' by name below)' : '') + '. Choose one to see its shelf.' : 'No product in the data is placed here.') + '</p>' +
+      (shown.length ? '<ul class="browse-list">' + shown.map(function (p) {
+        return '<li><button type="button" class="btn small" data-ndc="' + esc(p.ndc) + '">' + esc(p.drug + (p.strength ? ' ' + p.strength : '') + (p.form ? ' ' + p.form : '')) + '</button> <span class="ndc small muted">' + esc(Alpha.ndc.format(p.ndc)) + '</span></li>';
+      }).join('') + '</ul>' : '');
+    $('status').textContent = 'Showing ' + name + ' from the map.';
+  }
+
   function init() {
     if (!loadData()) return;
+    Alpha.map.onPick = browse;
     var q = $('q');
     q.addEventListener('input', runSearch);
     q.addEventListener('keydown', onInputKey);
