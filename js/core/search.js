@@ -67,7 +67,9 @@
       tokenize: tokenize,
       processTerm: function (t) { return t; },
       searchOptions: {
-        prefix: true,
+        // Words match by their start as you type; numbers only whole, so
+        // "prednisone 1 mg" never finds 10 mg (version-40).
+        prefix: function (term) { return !/^\d/.test(term); },
         // Typo tolerance only for words of 4+ letters, never for numbers.
         fuzzy: function (term) { return /^[a-z]{4,}$/.test(term) ? 0.25 : false; },
         combineWith: 'AND',

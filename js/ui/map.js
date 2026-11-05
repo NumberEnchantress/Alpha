@@ -13,6 +13,26 @@
   var el = null, svg = null, layout = null, marker = null, markerEst = null, markerRing = null, title = null, lastHi = [];
   var k = 1; // floor units per "standard" unit: a 100-wide floor has k = 1
 
+  // A rect may be turned (rect.rot, degrees clockwise about its centre), for
+  // shelving set at an angle. Its face (N, E, S, W) is a side of the turned
+  // rect; its label stays level so it reads easily.
+  function turned(r) { return r.rot ? ' transform="rotate(' + r.rot + ' ' + (r.x + r.w / 2) + ' ' + (r.y + r.h / 2) + ')"' : ''; }
+  function turnPoint(r, p) {
+    if (!r.rot) return p;
+    var a = r.rot * Math.PI / 180, cx = r.x + r.w / 2, cy = r.y + r.h / 2, dx = p[0] - cx, dy = p[1] - cy;
+    return [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)];
+  }
+  // The level box a turned rect covers.
+  function bbox(r) {
+    if (!r.rot) return r;
+    var c = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]].map(function (p) { return turnPoint(r, p); });
+    var xs = c.map(function (p) { return p[0]; }), ys = c.map(function (p) { return p[1]; });
+    var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys);
+    return { x: x0, y: y0, w: Math.max.apply(null, xs) - x0, h: Math.max.apply(null, ys) - y0 };
+  }
+  // A turned rect's label is sized for the rect as drawn, set level.
+  function labelBox(r) { return r.rot ? { x: r.x, y: r.y, w: r.w, h: r.h } : r; }
+
   function unitLabel(loc, unit) {
     if (loc.units.length === 1) return loc.code;
     return unit.label || unit.id;
@@ -52,16 +72,16 @@
     parts.push('<rect class="floor" x="0" y="0" width="' + W + '" height="' + D + '"/>');
     (lay.features || []).forEach(function (f) {
       var r = f.rect;
-      parts.push('<g class="feature ' + esc(f.kind || '') + '"><rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '"/>' +
-        label(r, f.label) + '</g>');
+      parts.push('<g class="feature ' + esc(f.kind || '') + '"><rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '"' + turned(r) + '/>' +
+        label(labelBox(r), f.label) + '</g>');
     });
     lay.locations.forEach(function (loc) {
       loc.units.forEach(function (u) {
         var r = u.rect, text = unitLabel(loc, u);
         parts.push('<g class="unit kind-' + esc(loc.kind) + '" data-loc="' + esc(loc.code) + '" data-unit="' + esc(u.id) + '">' +
-          '<rect class="u-box" x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '"/>' +
-          faceLine(u) +
-          label(r, text) +
+          '<g' + turned(r) + '><rect class="u-box" x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '"/>' +
+          faceLine(u) + '</g>' +
+          label(labelBox(r), text) +
           '</g>');
       });
     });
@@ -100,14 +120,14 @@
   }
 
   function standPoint(u) {
-    var r = u.rect, gap = 3.6 * k;
+    var r = u.rect, gap = 3.6 * k, p = null;
     switch (u.face) {
-      case 'N': return [r.x + r.w / 2, r.y - gap];
-      case 'S': return [r.x + r.w / 2, r.y + r.h + gap];
-      case 'W': return [r.x - gap, r.y + r.h / 2];
-      case 'E': return [r.x + r.w + gap, r.y + r.h / 2];
+      case 'N': p = [r.x + r.w / 2, r.y - gap]; break;
+      case 'S': p = [r.x + r.w / 2, r.y + r.h + gap]; break;
+      case 'W': p = [r.x - gap, r.y + r.h / 2]; break;
+      case 'E': p = [r.x + r.w + gap, r.y + r.h / 2]; break;
     }
-    return null;
+    return p && turnPoint(r, p);
   }
 
   function show(loc) {
@@ -142,7 +162,7 @@
     svg.setAttribute('aria-label', 'Floor map of ' + layout.name + '. Highlighted: ' + where);
     // What to keep in view when the map scrolls: the marker (below), or else the middle of the location.
     var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    L.units.forEach(function (u) { x0 = Math.min(x0, u.rect.x); x1 = Math.max(x1, u.rect.x + u.rect.w); y0 = Math.min(y0, u.rect.y); y1 = Math.max(y1, u.rect.y + u.rect.h); });
+    L.units.forEach(function (u) { var b = bbox(u.rect); x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x + b.w); y0 = Math.min(y0, b.y); y1 = Math.max(y1, b.y + b.h); });
     focus = [(x0 + x1) / 2, (y0 + y1) / 2];
     if (loc.unit) {
       var p = standPoint(loc.unit);
@@ -188,8 +208,8 @@
   });
   function tagOffset(p) {
     var boxes = [];
-    layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(u.rect); }); });
-    (layout.features || []).forEach(function (f) { boxes.push(f.rect); });
+    layout.locations.forEach(function (l) { l.units.forEach(function (u) { boxes.push(bbox(u.rect)); }); });
+    (layout.features || []).forEach(function (f) { boxes.push(bbox(f.rect)); });
     boxes = boxes.concat(textBoxes); // labels can be wider than their boxes
     var hw = (TAG_W / 2 + TAG_PAD) * k, hh = (TAG_H / 2 + TAG_PAD) * k;
     for (var i = 0; i < TAG_SPOTS.length; i++) {

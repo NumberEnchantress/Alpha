@@ -141,7 +141,8 @@
     h += '<fieldset><legend>Basket preset</legend>' + Alpha.presetsUI.all(ds).map(function (s) {
       return '<label class="opt"><input type="radio" name="scheme" value="' + esc(s.id) + '"' + (cur && cur.id === s.id ? ' checked' : '') + '> ' +
         esc(s.name) + ' <span class="muted">(' + s.groups.length + ' groups' + (builtIns[s.id] ? '' : ', yours') + ')</span>' +
-        (Alpha.presetsUI && Alpha.presetsUI.alike && Alpha.presetsUI.alike(s.id) != null ? ' <strong class="note-bad small">looks the same as "' + esc(Alpha.presetsUI.alike(s.id)) + '"</strong>' : '') + '</label>';
+        (Alpha.presetsUI && Alpha.presetsUI.alike && Alpha.presetsUI.alike(s.id) != null ? ' <strong class="note-bad small">looks the same as "' + esc(Alpha.presetsUI.alike(s.id)) + '"</strong>' : '') +
+        (Alpha.presetsUI && Alpha.presetsUI.warning && Alpha.presetsUI.warning(s.id) ? ' <strong class="note-bad small">does not pass today\'s checks</strong>' : '') + '</label>';
     }).join('') + '<p class="muted small">The preset sets the groups a script can be in and the baskets for each.</p>' +
       '<button type="button" class="btn" id="open-presets">Edit basket presets…</button></fieldset>';
 

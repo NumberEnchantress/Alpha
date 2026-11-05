@@ -110,7 +110,7 @@
     // few pixels at label size, so they are dropped: "\u1EB9", "\u0119" and "e" compare
     // the same. A horn ("\u01AF", "\u01A1") draws like an apostrophe after the letter.
     var d = clean(s).normalize('NFD').replace(/([dltL])\u030C/g, "$1'").replace(/\u030C/g, '\u0306').replace(/\u030B/g, '\u0308')
-      .replace(/\u031B/g, "'").replace(/[\u0316-\u031A\u031C-\u0333\u0339-\u033C]/g, '');
+      .replace(/[\u0316-\u0333\u0339-\u033C]/g, '');
     var k = skel(skel(d).normalize('NFKC').replace(IGNORABLE, '')).normalize('NFC').toLowerCase();
     // Also alike on screen: digit 0 and letter O, digit 1 and l, a bar and l, "rn" and "m".
     // (So "Mail" and "Mall" count as the same label: a refusal of two labels that
@@ -126,7 +126,8 @@
     // "\u016B" differ by 2 or 3 pixels at label size), and letters with a stroke
     // or joined letters compare as their plain letters ("\u0142" as l, "\u0153" as oe).
     if (!words) k = k.normalize('NFD').replace(/\p{M}/gu, '').replace(/[\u0142\u0141]/g, 'l').replace(/[\u0111\u0110]/g, 'd').replace(/[\u0127\u0126]/g, 'h')
-      .replace(/[\u0167\u0166]/g, 't').replace(/[\u00F8\u00D8]/g, 'o').replace(/[\u0153\u0152]/g, 'oe').replace(/[\u00E6\u00C6]/g, 'ae').replace(/\u00DF/g, 'ss').toLowerCase();
+      .replace(/[\u0167\u0166]/g, 't').replace(/[\u00F8\u00D8]/g, 'o').replace(/[\u0153\u0152]/g, 'oe').replace(/[\u00E6\u00C6]/g, 'ae').replace(/\u00DF/g, 'ss')
+      .replace(/[\u014B\u014A]/g, 'n').replace(/[\u00FE\u00DE]/g, 'p').replace(/['"\u2018\u2019\u201C\u201D\u201E\u02BC`\u00B4]/g, '').replace(/,/g, '.').replace(/;/g, ':').toLowerCase();
     // A run of dashes looks like one long dash ("A--B", "A\u2014B").
     return words ? k : k.replace(/-+/g, '-').replace(/[i1|]/g, 'l').replace(/0/g, 'o').replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/cl/g, 'd').replace(/`/g, "'").replace(/''/g, '"');
   }

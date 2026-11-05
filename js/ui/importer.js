@@ -270,7 +270,7 @@
         h += '<h4>Rows not imported</h4>' + table(p.skipped, [['row', 'Line'], ['ndc', 'NDC'], ['reason', 'Why']], 'None.');
         var check = p.notes.filter(function (n) { return !n.routine; }), routine = p.notes.filter(function (n) { return n.routine; });
         h += '<h4>' + (notApplied ? 'Read, with notes to check' : 'Imported, with notes to check') + '</h4>' + table(check, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']], 'None.');
-        if (routine.length) h += '<details><summary>How ' + routine.length + ' value' + (routine.length > 1 ? 's were' : ' was') + ' read (descriptions split, Excel text)</summary>' + table(routine, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']]) + '</details>';
+        if (routine.length) h += '<details><summary>How ' + routine.length + ' value' + (routine.length > 1 ? 's were' : ' was') + ' read (Excel text and other routine reads)</summary>' + table(routine, [['row', 'Line'], ['ndc', 'NDC'], ['note', 'Note']]) + '</details>';
       }
     }
     if (rep.robot) {

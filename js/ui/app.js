@@ -50,7 +50,8 @@
     // A result found only by a different spelling may be another drug
     // (hydralazine / hydroxyzine, prednisolone / prednisone): it is listed,
     // marked, and chosen only with the arrow keys or a click.
-    S.active = S.results.length && !S.results[0].typo ? 0 : -1;
+    S.ambiguous = S.results.length > 1 && S.results[0].tier > 0 && S.results.some(function (x) { return x.product.drug !== S.results[0].product.drug; });
+    S.active = S.results.length && !S.results[0].typo && !S.ambiguous ? 0 : -1;
     renderResults(r, q);
     choose(S.active >= 0 ? S.results[0].product : null);
   }
@@ -82,6 +83,9 @@
       st = r.badCheck ? 'Barcode ' + q.trim() + ' fails its check digit: scan it again or type the NDC.'
         : r.badShape ? '“' + q.trim() + '” is not an NDC shape. Use 5-4-2, 4-4-2, 5-3-2 or 5-4-1, or the digits alone.'
         : r.complete ? 'No product with NDC ' + r.complete + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
+    } else if (S.ambiguous && !S.results[0].typo) {
+      var names = []; S.results.forEach(function (x) { if (names.indexOf(x.product.drug) < 0) names.push(x.product.drug); });
+      st = r.total + ' matches for ' + (names.length > 3 ? names.length + ' different drugs' : names.join(', ')) + ': choose one with ↓ or a click.';
     } else if (S.results[0] && S.results[0].typo) {
       st = 'No exact match for “' + q.trim() + '”. ' + (r.total === 1 ? 'A drug with a similar spelling is' : r.total + ' drugs with similar spellings are') +
         ' listed: it may be a different drug. Check the name, then choose with ↓ or a click.';
@@ -165,7 +169,7 @@
     else if (e.key === 'Enter') {
       e.preventDefault();
       // (not a result found only by a different spelling: that needs ↓ or a click)
-      if (S.active < 0 && S.results.length && !S.results[0].typo) { S.active = 0; updateActive(); }
+      if (S.active < 0 && S.results.length && !S.results[0].typo && !S.ambiguous) { S.active = 0; updateActive(); }
       if (S.active >= 0) { choose(S.results[S.active].product); showShelf(); }
       e.target.select(); // the next scan or typed search replaces the text
     } else if (e.key === 'Escape') {

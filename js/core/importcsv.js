@@ -683,6 +683,15 @@
         return;
       }
       var sh = shiftedCols(row);
+      var STRENGTHY = /^\d[\d.,]*\s*(mg|mcg|[µμ]g|ug|g|ml|%|meq|units?|iu)\b/i, PLACE_COLS = ['location', 'unit', 'shelf', 'countPerBottle', 'vial20', 'vial40', 'vial60'];
+      var stray = PLACE_COLS.filter(function (c) { return m[c] && STRENGTHY.test(get(c)); })[0];
+      if (stray) { report.skipped.push({ row: line, ndc: String(rawNdc).slice(0, 30), reason: 'the "' + m[stray] + '" value is "' + get(stray).slice(0, 20) + '", a strength, so the values look shifted between columns; the row was not read' }); return; }
+      var locAt = m.location ? p.fields.indexOf(m.location) : -1, locV = get('location');
+      // (a unit code such as "FMN" for FM-N is a place too)
+      var unitCode = locV && /[a-z]/i.test(locV) && layout.locations.some(function (lc) { return lc.units.some(function (u) { return key(u.id) === key(locV); }); });
+      if (locAt >= 0 && locV && !NUMERIC.test(locV) && !PLACEHOLDER.test(locV) && !findLocation(locV, layout) && !unitCode && (colNum[locAt] || 0) >= 2 && (colTxt[locAt] || 0) === 1) {
+        report.skipped.push({ row: line, ndc: String(rawNdc).slice(0, 30), reason: 'the "' + m.location + '" value is "' + locV.slice(0, 20) + '", which is not a place on the layout, where every other row has a number: the values look shifted between columns, so the row was not read' }); return;
+      }
       if (sh.length >= 2) { report.skipped.push({ row: line, ndc: String(rawNdc).slice(0, 30), reason: 'its values look shifted between columns: ' + sh.map(function (i) { return '"' + (p.fields[i] || 'column ' + (i + 1)) + '" is "' + String(row.cells[i]).trim().slice(0, 20) + '"'; }).join(' and ') + ', unlike every other row (an unquoted comma inside a value with a value missing elsewhere does that), so the row was not read' }); return; }
       if (row.endLine > line) note('a quoted field on lines ' + line + '-' + row.endLine + ' holds line breaks; they were kept');
       var xl = ndcText(rawNdc);
@@ -726,9 +735,11 @@
       // and form come only from their own columns, else they are unknown.
       if (strength && PLACEHOLDER.test(strength)) { note('strength "' + strength + '" read as not given'); strength = ''; }
       else if (strength && /(?<![\d.,])[1-9]\d{0,2}[.,]\d{3}(?!\d)|\d,\d{1,2}(?!\d)/.test(strength)) { note('strength "' + strength + '" has a mark that may be a decimal point or a thousands mark (1.000 can be 1 or 1000), so it cannot be read safely; strength left unknown'); strength = ''; }
+      else if (strength && !/\d/.test(strength)) { note('strength "' + strength + '" has no number, so it may be a value from another column; strength left unknown'); strength = ''; }
       else if (strength && !/[\p{L}%]/u.test(strength) && !/^\d+(\.\d+)?:\d+$/.test(strength)) { note('strength "' + strength + '" has no unit (such as mg), so it may be a value from another column; strength left unknown'); strength = ''; }
       ['form', 'manufacturer', 'notes'].forEach(function (c) { if (get(c) && PLACEHOLDER.test(get(c))) note(c + ' "' + get(c) + '" read as not given'); });
       if (form && PLACEHOLDER.test(form)) form = '';
+      else if (form && /\d/.test(form)) { note('form "' + form + '" has a number in it, so it may be a value from another column; form left unknown'); form = ''; }
       if (strength) prod.strength = strength;
       if (form) prod.form = form;
       if (get('manufacturer') && !PLACEHOLDER.test(get('manufacturer'))) prod.manufacturer = get('manufacturer');
@@ -804,7 +815,7 @@
       else if (cnt.value == null && descCount && !get('countPerBottle')) note('the description gives a pack size ("' + descCount.text + '"); counts are read only from a count column, so the count is left unknown', true);
       // A "Pack Size" column for a liquid, cream or powder ("SOLUTION 473 ML",
       // 473) holds the bottle or tube size, not a count of units (version-38).
-      else if (cnt.value != null && !/count/.test(key(m.countPerBottle)) && /\d\s*(ml|l|g|gm|grams?|oz|fl\.?\s*oz)\b|\b(syrup|solution|soln|susp|suspension|cream|crm|ointment|oint|gel|lotion|liquid|elixir|spray|drops|inhaler|powder|foam|shampoo|paste)\b/i.test([get('drug'), get('strength'), get('form')].join(' ')) && !/\b(tab|tabs|tablets?|caps?|capsules?|needles?|syringes?|lancets?)\b/i.test([get('drug'), get('form')].join(' ')))
+      else if (cnt.value != null && !/count/.test(key(m.countPerBottle)) && /\d\s*(ml|l|g|gm|grams?|oz|fl\.?\s*oz)\b|\b(syrup|syrp|syr|solution|soln|sol|susp|susr|suspension|cream|crm|cre|crea|ointment|oint|oin|gel|lotion|lot|lotn|liquid|liq|elixir|elix|spray|spr|aerosol|aer|aero|drops|drop|gtt|inhaler|inh|neb|powder|powd|pwd|foam|shampoo|paste|emulsion|emul|enema|wash|rinse|mouthwash)\b/i.test([get('drug'), get('strength'), get('form')].join(' ')) && !/\b(tab|tabs|tablets?|caps?|capsules?|needles?|syringes?|lancets?)\b/i.test([get('drug'), get('form')].join(' ')))
         note('"' + m.countPerBottle + '" is ' + cnt.value + ', but the product is a liquid, cream or powder ("' + [get('drug'), get('strength'), get('form')].filter(Boolean).join(', ').slice(0, 60) + '"), so the number may be the package size, not a count; count left unknown');
       else if (cnt.value != null) prod.countPerBottle = cnt.value;
       var rk = int(get('rank'), 1, semi);

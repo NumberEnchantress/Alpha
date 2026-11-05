@@ -17,6 +17,12 @@
     var layout = ds.layout || {}, locs = layout.locations || [];
     var byCode = {}, unitIds = {};
 
+    // A turned rect (rot, degrees about its centre) is checked by the level box it covers.
+    function turnedBox(r) {
+      if (!r.rot) return r;
+      var a = r.rot * Math.PI / 180, cx = r.x + r.w / 2, cy = r.y + r.h / 2, hw = (Math.abs(r.w * Math.cos(a)) + Math.abs(r.h * Math.sin(a))) / 2, hh = (Math.abs(r.w * Math.sin(a)) + Math.abs(r.h * Math.cos(a))) / 2;
+      return { x: cx - hw, y: cy - hh, w: 2 * hw, h: 2 * hh };
+    }
     locs.forEach(function (l, i) {
       var where = 'layout.locations[' + i + '] (' + l.code + ')';
       if (byCode[l.code]) errors.push(where + ': duplicate location code');
@@ -24,8 +30,8 @@
       (l.units || []).forEach(function (u) {
         if (unitIds[u.id]) errors.push(where + ': duplicate unit id ' + u.id);
         unitIds[u.id] = 1;
-        var r = u.rect || {};
-        if (r.x < 0 || r.y < 0 || r.x + r.w > layout.width || r.y + r.h > layout.depth) {
+        var r = turnedBox(u.rect || {});
+        if (r.x < -0.01 || r.y < -0.01 || r.x + r.w > layout.width + 0.01 || r.y + r.h > layout.depth + 0.01) {
           errors.push(where + ': unit ' + u.id + ' is outside the floor');
         }
         if (u.shelfRanges && u.shelfRanges.length !== u.shelves) {
