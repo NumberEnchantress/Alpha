@@ -173,7 +173,7 @@
       '</div></details></fieldset>';
 
     var issues = S.issues || { errors: [], warnings: [] };
-    h += '<fieldset><legend>Data</legend><p>' + esc(ds.meta.name) + (ds.meta.sample ? ' <strong>(sample, fictional)</strong>' : '') + ': ' +
+    h += '<fieldset><legend>Data</legend><p>' + esc(ds.meta.name) + (ds.meta.sample ? (ds.meta.layoutReal ? ' <strong>(simulated stock)</strong>' : ' <strong>(sample, fictional)</strong>') : '') + ': ' +
       ds.products.length + ' products, ' + ds.layout.locations.length + ' locations.</p>' +
       '<p>Data check: ' + issues.errors.length + ' errors, ' + issues.warnings.length + ' warnings.</p>' +
       (issues.errors.length || issues.warnings.length ? '<details><summary>Show the list</summary><ul class="issue-list small">' +

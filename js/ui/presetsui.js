@@ -27,13 +27,13 @@
 
   function builtInIds() {
     var ids = Object.create(null);
-    (((Alpha.state && Alpha.state.ds) || window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample) || {}).basketSchemes || [])
+    (((Alpha.state && Alpha.state.ds) || window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sim || window.ALPHA_DATASETS.sample) || {}).basketSchemes || [])
       .forEach(function (p) { ids[p.id] = 1; });
     return ids;
   }
 
   function builtInNames() {
-    var ds = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample)) || {};
+    var ds = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sim || window.ALPHA_DATASETS.sample)) || {};
     return (ds.basketSchemes || []).map(function (p) { return P.sameKey(p.name); });
   }
 
@@ -43,7 +43,7 @@
   function plainKey(x) { return P.clean(x).toLowerCase(); }
   function loadMine() {
     var ok = [], bad = [], names = Object.create(null), builtins = builtInIds();
-    var ds0 = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sample)) || {};
+    var ds0 = (Alpha.state && Alpha.state.ds) || (window.ALPHA_DATASETS && (window.ALPHA_DATASETS.real || window.ALPHA_DATASETS.sim || window.ALPHA_DATASETS.sample)) || {};
     (ds0.basketSchemes || []).forEach(function (p) { names[plainKey(p.name)] = 1; });
     if (memoryOnly) return; // storage is blocked: keep what is in memory
     migrateOldList();

@@ -15,7 +15,10 @@
   function chooseDataset() {
     var sets = window.ALPHA_DATASETS || {};
     var imported = Alpha.settings && Alpha.settings.importedDataset ? Alpha.settings.importedDataset() : null;
-    return imported || sets.real || sets.sample || null;
+    // The default is the store's layout with simulated stock (data/sim);
+    // ?dataset=sample opens the fictional sample the tests are written for.
+    var askSample = /[?&]dataset=sample(&|$)/.test(location.search || '');
+    return imported || sets.real || (askSample ? sets.sample : null) || sets.sim || sets.sample || null;
   }
 
   function loadData() {
@@ -27,7 +30,8 @@
     $('dataset-name').textContent = S.ds.meta.name;
     var banner = $('sample-banner');
     banner.hidden = !S.ds.meta.sample && !S.ds.meta.layoutIsSample;
-    banner.textContent = S.ds.meta.sample ? 'SAMPLE DATA: fictional, not for dispensing'
+    banner.textContent = S.ds.meta.sample && S.ds.meta.layoutReal ? 'SIMULATED STOCK: drugs and NDCs are made up, not for dispensing'
+      : S.ds.meta.sample ? 'SAMPLE DATA: fictional, not for dispensing'
       : 'Imported products on the SAMPLE layout: map and shelf positions are not real';
     Alpha.map.init($('map'), S.ds.layout);
     Alpha.info.renderBaskets($('baskets'), Alpha.settings.scheme(S.ds), Alpha.settings.schemeProblem(S.ds));

@@ -1017,7 +1017,7 @@
     opts = opts || {};
     return {
       meta: { id: 'imported', name: (base.layout.name || 'Pharmacy') + (opts.productsAreSample ? ' + robot list' : ' + imported products'),
-        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && (base.meta.layoutIsSample || base.meta.sample)), source: source || 'CSV import',
+        sample: !!opts.productsAreSample, layoutIsSample: !!(base.meta && (base.meta.layoutIsSample || (base.meta.sample && !base.meta.layoutReal))), source: source || 'CSV import',
         robotPrior: opts.robotPrior || undefined, robotList: opts.robotList || undefined },
       layout: base.layout, products: products, rules: base.rules, basketSchemes: base.basketSchemes,
       groupLabels: base.groupLabels || []
