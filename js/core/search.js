@@ -63,7 +63,7 @@
 
     var ms = new MiniSearch({
       idField: 'ndc',
-      fields: ['drug', 'strength', 'form', 'manufacturer'],
+      fields: ['drug', 'brand', 'strength', 'form', 'manufacturer'],
       tokenize: tokenize,
       processTerm: function (t) { return t; },
       searchOptions: {
@@ -73,11 +73,11 @@
         // Typo tolerance only for words of 4+ letters, never for numbers.
         fuzzy: function (term) { return /^[a-z]{4,}$/.test(term) ? 0.25 : false; },
         combineWith: 'AND',
-        boost: { drug: 3, strength: 2, form: 1, manufacturer: 0.5 }
+        boost: { drug: 3, brand: 3, strength: 2, form: 1, manufacturer: 0.5 }
       }
     });
     ms.addAll(products.map(function (p) {
-      return { ndc: p.ndc, drug: p.drug, strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
+      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
     }));
 
     function textSearch(q) {
@@ -102,7 +102,11 @@
         }
         // typo: found only by a different spelling. It may be another drug
         // ("hydralazine" finds hydroxyzine), so it is never chosen unasked.
-        out.push({ product: p, tier: tier, o: order[p.ndc], typo: typo });
+        // lead: 1 when the drug's name does not start with a word searched for,
+        // so "atorvastatin 40" lists atorvastatin before amlodipine-atorvastatin.
+        var first = tokenize(p.drug)[0] || '', bfirst = tokenize(p.brand)[0] || '', lead = 1;
+        for (j = 0; j < qterms.length; j++) if (/^[a-z]/.test(qterms[j]) && (first.indexOf(qterms[j]) === 0 || (bfirst && bfirst.indexOf(qterms[j]) === 0))) { lead = 0; break; }
+        out.push({ product: p, tier: tier, lead: lead, o: order[p.ndc], typo: typo });
       }
       return out;
     }
@@ -139,7 +143,7 @@
       var mode = digitsOnly ? 'ndc' : 'text';
       var nd = digitsOnly ? ndcSearch(q) : null;
       var res = nd ? nd.results : textSearch(q);
-      res.sort(function (a, b) { return (a.tier - b.tier) || (a.o - b.o); });
+      res.sort(function (a, b) { return (a.tier - b.tier) || ((a.lead || 0) - (b.lead || 0)) || (a.o - b.o); });
       var total = res.length;
       // `complete`: the full NDC or barcode searched for, when the query was one.
       return { mode: mode, results: limit ? res.slice(0, limit) : res, total: total, complete: nd ? nd.complete : null, badShape: !!(nd && nd.badShape), badCheck: !!(nd && nd.badCheck) };

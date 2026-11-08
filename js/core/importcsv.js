@@ -24,6 +24,7 @@
     strength: ['strength', 'str', 'drugstrength'],
     form: ['form', 'dosageform'],
     manufacturer: ['manufacturer', 'manufacturername', 'mfr', 'mfg', 'mfgname', 'labeler', 'labelername', 'maker'],
+    brand: ['brand', 'brandname', 'tradename'],
     location: ['location', 'loc', 'locationcode', 'bin', 'binlocation', 'shelflocation', 'shelfloc', 'stocklocation', 'storagelocation', 'locationid', 'binno', 'binnumber'],
     unit: ['unit', 'face', 'fridge', 'section'],
     shelf: ['shelf', 'shelfnumber', 'shelfno'],
@@ -743,6 +744,7 @@
       if (strength) prod.strength = strength;
       if (form) prod.form = form;
       if (get('manufacturer') && !PLACEHOLDER.test(get('manufacturer'))) prod.manufacturer = get('manufacturer');
+      if (get('brand') && !PLACEHOLDER.test(get('brand'))) prod.brand = get('brand');
       if (get('notes') && !PLACEHOLDER.test(get('notes'))) prod.notes = get('notes');
 
       var loc = null, rawLoc = get('location'), unitInLoc = null;

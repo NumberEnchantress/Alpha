@@ -62,7 +62,7 @@
     var where = whereText(loc);
     var niosh = p.niosh === true ? '<span class="yes-hazard">Yes<span class="tag">HAZARDOUS</span></span>' : yesNo(p.niosh);
     el.innerHTML =
-      '<h2 class="i-head">' + esc(p.drug) + ' ' + show(p.strength) + '</h2>' +
+      '<h2 class="i-head">' + esc(Alpha.ui.name(p)) + ' ' + show(p.strength) + '</h2>' +
       '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' +
       '<div class="i-loc ' + where.cls + '" data-testid="where">' + esc(where.text) + '</div>' +
       warningsHtml(warnings) +

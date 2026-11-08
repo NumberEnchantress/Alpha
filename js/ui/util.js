@@ -49,5 +49,8 @@
     });
     return w;
   }
-  Alpha.ui = { esc: esc, known: known, show: show, yesNo: yesNo, UNKNOWN: UNKNOWN, store: store, SVGNS: SVGNS, textEm: textEm };
+  // A product's name as shown: the drug, then its brand when it has one
+  // ("norgestimate-ethinyl estradiol (Sprintec)").
+  function name(p) { return p.drug + (p.brand ? ' (' + p.brand + ')' : ''); }
+  Alpha.ui = { name: name, esc: esc, known: known, show: show, yesNo: yesNo, UNKNOWN: UNKNOWN, store: store, SVGNS: SVGNS, textEm: textEm };
 })(window.Alpha);

@@ -66,7 +66,7 @@
   function place(st) {
     var shown = mark(st.svg, st.loc, st.p);
     var cap = st.el.querySelector('.elev-caption'), c = caption(st.loc);
-    if (cap) cap.textContent = (shown || st.loc.shelf == null ? '' : st.p.drug + (st.p.strength ? ' ' + st.p.strength : '') + ': ') + c.text;
+    if (cap) cap.textContent = (shown || st.loc.shelf == null ? '' : Alpha.ui.name(st.p) + (st.p.strength ? ' ' + st.p.strength : '') + ': ') + c.text;
   }
 
   // Highlights the shelf and writes the drug (and ESTIMATED) on it.
@@ -95,7 +95,7 @@
     g.classList.add(est ? 'shelf-est' : 'shelf-hi');
     // Two lines, so the strength is never cut off: drug, then strength.
     var y = Number(g.getAttribute('data-y')), h = Number(g.getAttribute('data-h'));
-    var line1 = trim(p.drug, 26), line2 = (p.strength || '') + (est ? ' · ≈ ESTIMATED' : '');
+    var line1 = trim(Alpha.ui.name(p), 26), line2 = (p.strength || '') + (est ? ' · ≈ ESTIMATED' : '');
     // Both lines share one size that fits the row height and the shelf width (80 units).
     var widest = Math.max(Alpha.ui.textEm(line1), Alpha.ui.textEm(line2), 5); // in em (bold), see ui.textEm
     var fs = Math.min(5.6, h * 0.4, 80 / widest);
