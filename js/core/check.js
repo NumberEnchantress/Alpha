@@ -79,7 +79,7 @@
         errors.push(where + ': unit or shelf given without a location');
       }
       if (p.rank != null) {
-        var key = [p.drug, p.strength, p.form].join('|').toLowerCase();
+        var key = [p.drug, p.strength, p.form, p.brand || ''].join('|').toLowerCase(); // brand: one pack is not another (version-47)
         if (ranks[key] && ranks[key][p.rank]) warnings.push(where + ': rank ' + p.rank + ' used twice for ' + key);
         (ranks[key] = ranks[key] || {})[p.rank] = 1;
       }

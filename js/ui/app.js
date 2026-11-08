@@ -68,7 +68,7 @@
       var cls = 'result' + (i < 3 ? ' top3' : '') + (i === 3 ? ' after-top3' : '');
       html += '<li id="r' + i + '" class="' + cls + '" role="option" aria-selected="' + (i === S.active) + '" data-i="' + i + '">' +
         '<span class="r-num">' + (i + 1) + '</span>' +
-        '<span class="r-name">' + esc(p.drug) + ' ' + ui.show(p.strength) + (p.form ? ' <span class="r-meta">' + esc(p.form) + '</span>' : '') +
+        '<span class="r-name">' + esc(ui.name(p)) + ' ' + ui.show(p.strength) + (p.form ? ' <span class="r-meta">' + esc(p.form) + '</span>' : '') +
           (S.results[i].typo ? ' <span class="r-typo">different spelling: check the name</span>' : '') + '</span>' +
         '<span class="r-meta"><span class="ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</span> · ' +
           (p.location != null ? esc(p.location) : 'location unknown') + ' · ' + ui.show(p.manufacturer) + '</span>' +
@@ -236,7 +236,7 @@
     $('info').innerHTML = '<h2 class="browse-title">' + esc(name) + '</h2>' +
       '<p>' + (here.length ? here.length + (here.length === 1 ? ' product is' : ' products are') + ' placed here' + (here.length > MAX ? ' (the first ' + MAX + ' by name below)' : '') + '. Choose one to see its shelf.' : 'No product in the data is placed here.') + '</p>' +
       (shown.length ? '<ul class="browse-list">' + shown.map(function (p) {
-        return '<li><button type="button" class="btn small" data-ndc="' + esc(p.ndc) + '">' + esc(p.drug + (p.strength ? ' ' + p.strength : '') + (p.form ? ' ' + p.form : '')) + '</button> <span class="ndc small muted">' + esc(Alpha.ndc.format(p.ndc)) + '</span></li>';
+        return '<li><button type="button" class="btn small" data-ndc="' + esc(p.ndc) + '">' + esc(Alpha.ui.name(p) + (p.strength ? ' ' + p.strength : '') + (p.form ? ' ' + p.form : '')) + '</button> <span class="ndc small muted">' + esc(Alpha.ndc.format(p.ndc)) + '</span></li>';
       }).join('') + '</ul>' : '');
     $('status').textContent = 'Showing ' + name + ' from the map.';
   }
