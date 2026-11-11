@@ -54,6 +54,13 @@
     }).join('') + '</ul>';
   }
 
+  // Where the NDC comes from (version-50): the FDA's directory, or a placeholder that is not a real NDC.
+  function ndcSource(p) {
+    var meta = (Alpha.state && Alpha.state.ds && Alpha.state.ds.meta) || {};
+    var text = Alpha.ndc.isFakeLabeler(p.ndc) ? 'Placeholder, not a real NDC' : meta.publicNdcs ? 'NDC from the FDA NDC Directory' : '';
+    return text ? '<div class="i-ndc-src small muted" data-testid="ndc-source">' + esc(text) + '</div>' : '';
+  }
+
   function render(el, p, loc, warnings) {
     if (!p) {
       el.innerHTML = '<p class="empty">Type a drug and strength (<kbd>atorva 40</kbd>) or scan or type an NDC.</p>';
@@ -63,7 +70,7 @@
     var niosh = p.niosh === true ? '<span class="yes-hazard">Yes<span class="tag">HAZARDOUS</span></span>' : yesNo(p.niosh);
     el.innerHTML =
       '<h2 class="i-head">' + esc(Alpha.ui.name(p)) + ' ' + show(p.strength) + '</h2>' +
-      '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' +
+      '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' + ndcSource(p) +
       '<div class="i-loc ' + where.cls + '" data-testid="where">' + esc(where.text) + '</div>' +
       warningsHtml(warnings) +
       // Two facts per row so the card fits at 1366x768.
