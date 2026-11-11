@@ -54,6 +54,8 @@
     return order;
   }
 
+  var SCHED_WORD = { CII: 'ctwo', CIII: 'cthree', CIV: 'cfour', CV: 'cfive', OTC: 'otc', Rx: 'rx' };
+
   function createIndex(products) {
     var byNdc = Object.create(null), byTen = Object.create(null), order = productOrder(products);
     products.forEach(function (p) {
@@ -63,7 +65,7 @@
 
     var ms = new MiniSearch({
       idField: 'ndc',
-      fields: ['drug', 'brand', 'aka', 'strength', 'form', 'manufacturer'],
+      fields: ['drug', 'brand', 'aka', 'strength', 'form', 'manufacturer', 'schedule'],
       tokenize: tokenize,
       processTerm: function (t) { return t; },
       searchOptions: {
@@ -73,11 +75,14 @@
         // Typo tolerance only for words of 4+ letters, never for numbers.
         fuzzy: function (term) { return /^[a-z]{4,}$/.test(term) ? 0.25 : false; },
         combineWith: 'AND',
-        boost: { drug: 3, brand: 3, aka: 2, strength: 2, form: 1, manufacturer: 0.5 }
+        boost: { drug: 3, brand: 3, aka: 2, strength: 2, form: 1, manufacturer: 0.5, schedule: 1 }
       }
     });
     ms.addAll(products.map(function (p) {
-      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', aka: (p.aka || []).join(' '), strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
+      // the schedule as a word to search by (version-51): "ctwo" ... "cfive" (no word is the start of
+      // another, as "cii" is of "ciii"), "controlled" for all four, "otc", "rx"
+      var sch = p.schedule ? (SCHED_WORD[p.schedule] || p.schedule.toLowerCase()) + (/^C/.test(p.schedule) ? ' controlled' : '') : '';
+      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', aka: (p.aka || []).join(' '), schedule: sch, strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
     }));
 
     function textSearch(q) {
@@ -150,6 +155,8 @@
       if (!q) return { mode: 'empty', results: [], total: 0 };
       // "NDC 99999-0123-01", "NDC# 99999012301": the label in front of an NDC is not a word to search for (version-50)
       q = q.replace(/^ndc\s*[#:]?\s*(?=\d)/i, '');
+      // "C-II", "c 2", "schedule 2", "CII": one word, as the index holds it (version-51)
+      q = q.replace(/\b(?:c|schedule)[\s-]*(ii|iii|iv|v|2|3|4|5)\b/gi, function (m, n) { return ' ' + SCHED_WORD['C' + ({ 2: 'II', 3: 'III', 4: 'IV', 5: 'V' }[n] || n.toUpperCase())] + ' '; }).trim();
       var digitsOnly = !/[a-z]/i.test(q) && ndc.digits(q).length >= 5;
       var mode = digitsOnly ? 'ndc' : 'text';
       var nd = digitsOnly ? ndcSearch(q) : null;
