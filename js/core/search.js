@@ -148,6 +148,8 @@
     function search(query, limit) {
       var q = String(query || '').trim();
       if (!q) return { mode: 'empty', results: [], total: 0 };
+      // "NDC 99999-0123-01", "NDC# 99999012301": the label in front of an NDC is not a word to search for (version-50)
+      q = q.replace(/^ndc\s*[#:]?\s*(?=\d)/i, '');
       var digitsOnly = !/[a-z]/i.test(q) && ndc.digits(q).length >= 5;
       var mode = digitsOnly ? 'ndc' : 'text';
       var nd = digitsOnly ? ndcSearch(q) : null;
