@@ -30,7 +30,8 @@
     $('dataset-name').textContent = S.ds.meta.name;
     var banner = $('sample-banner');
     banner.hidden = !S.ds.meta.sample && !S.ds.meta.layoutIsSample;
-    banner.textContent = S.ds.meta.sample && S.ds.meta.layoutReal ? 'SIMULATED STOCK: drugs and NDCs are made up, not for dispensing'
+    // (version-49: since version-48 the drugs, makers and NDCs are real; the shelf places and stock are not)
+    banner.textContent = S.ds.meta.sample && S.ds.meta.layoutReal ? (S.ds.meta.publicNdcs ? 'SIMULATED STOCK: shelf locations and stock are made up. Not for dispensing.' : 'SIMULATED STOCK: drugs and NDCs are made up, not for dispensing')
       : S.ds.meta.sample ? 'SAMPLE DATA: fictional, not for dispensing'
       : 'Imported products on the SAMPLE layout: map and shelf positions are not real';
     Alpha.map.init($('map'), S.ds.layout);
