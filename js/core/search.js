@@ -63,7 +63,7 @@
 
     var ms = new MiniSearch({
       idField: 'ndc',
-      fields: ['drug', 'brand', 'strength', 'form', 'manufacturer'],
+      fields: ['drug', 'brand', 'aka', 'strength', 'form', 'manufacturer'],
       tokenize: tokenize,
       processTerm: function (t) { return t; },
       searchOptions: {
@@ -73,11 +73,11 @@
         // Typo tolerance only for words of 4+ letters, never for numbers.
         fuzzy: function (term) { return /^[a-z]{4,}$/.test(term) ? 0.25 : false; },
         combineWith: 'AND',
-        boost: { drug: 3, brand: 3, strength: 2, form: 1, manufacturer: 0.5 }
+        boost: { drug: 3, brand: 3, aka: 2, strength: 2, form: 1, manufacturer: 0.5 }
       }
     });
     ms.addAll(products.map(function (p) {
-      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
+      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', aka: (p.aka || []).join(' '), strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
     }));
 
     function textSearch(q) {
@@ -104,8 +104,17 @@
         // ("hydralazine" finds hydroxyzine), so it is never chosen unasked.
         // lead: 1 when the drug's name does not start with a word searched for,
         // so "atorvastatin 40" lists atorvastatin before amlodipine-atorvastatin.
-        var first = tokenize(p.drug)[0] || '', bfirst = tokenize(p.brand)[0] || '', lead = 1;
-        for (j = 0; j < qterms.length; j++) if (/^[a-z]/.test(qterms[j]) && (first.indexOf(qterms[j]) === 0 || (bfirst && bfirst.indexOf(qterms[j]) === 0))) { lead = 0; break; }
+        // A brand counts too (version-48): a brand or other name (aka) the words name whole
+        // leads ("eliquis": the Eliquis tablets), one whose brand only starts so comes next
+        // ("Eliquis Sprinkle").
+        var first = tokenize(p.drug)[0] || '', btoks = tokenize(p.brand), akas = tokenize((p.aka || []).join(' ')), lead = 1;
+        var words = qterms.filter(function (t) { return /^[a-z]/.test(t); });
+        for (j = 0; j < words.length; j++) {
+          var w = words[j];
+          if (first.indexOf(w) === 0 || (btoks.length && btoks.every(function (b) { return words.indexOf(b) >= 0; }))) { lead = 0; break; }
+          if (akas.some(function (a) { return a.indexOf(w) === 0; })) lead = Math.min(lead, 0.25);
+          if (btoks.length && btoks[0].indexOf(w) === 0) lead = Math.min(lead, 0.5);
+        }
         out.push({ product: p, tier: tier, lead: lead, o: order[p.ndc], typo: typo });
       }
       return out;

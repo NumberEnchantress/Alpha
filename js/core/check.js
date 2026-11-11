@@ -53,7 +53,8 @@
       else {
         if (ndcs[p.ndc]) errors.push(where + ': duplicate NDC (also products[' + ndcs[p.ndc] + '])');
         else ndcs[p.ndc] = String(i);
-        if (ds.meta && ds.meta.sample && !A.ndc.isFakeLabeler(p.ndc)) errors.push(where + ': sample NDCs must use labeler 99999');
+        // (meta.publicNdcs: the simulated store, whose NDCs are copied from the public FDA directory, version-48)
+        if (ds.meta && ds.meta.sample && !ds.meta.publicNdcs && !A.ndc.isFakeLabeler(p.ndc)) errors.push(where + ': sample NDCs must use labeler 99999');
       }
 
       if (p.location != null) {

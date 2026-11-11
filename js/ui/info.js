@@ -75,6 +75,7 @@
         '<dt>In robot</dt><dd>' + yesNo(p.robot) + '</dd>' +
         '<dt>Preferred</dt><dd>' + yesNo(p.preferred) + '</dd>' +
         '<dt>Maker</dt><dd class="span">' + show(p.manufacturer) + '</dd>' +
+        (p.aka && p.aka.length ? '<dt>Also known as</dt><dd class="span">' + esc(p.aka.join(', ')) + '</dd>' : '') +
         '<dt>Vial fits</dt><dd class="span">' + vials(p.vialCapacity) + '</dd>' +
       '</dl>' +
       (ui.known(p.notes) ? '<div class="notes">' + esc(p.notes) + '</div>' : '');
