@@ -54,6 +54,15 @@
     }).join('') + '</ul>';
   }
 
+  // The schedule as a pharmacy writes it (version-51): OTC, Rx only, C-II ... C-V; uncertain ones say so.
+  var SCHED_TEXT = { OTC: 'OTC', Rx: 'Rx only', CV: 'C-V', CIV: 'C-IV', CIII: 'C-III', CII: 'C-II' };
+  function scheduleText(p) {
+    if (!p.schedule) return UNKNOWN;
+    var t = esc(SCHED_TEXT[p.schedule] || p.schedule);
+    if (/^C/.test(p.schedule)) t = '<strong>' + t + '</strong>';
+    return t + (p.scheduleNote ? ' <span class="tag">CHECK</span> <span class="small muted">' + esc(p.scheduleNote) + '</span>' : '');
+  }
+
   // Where the NDC comes from (version-50): the FDA's directory, or a placeholder that is not a real NDC.
   function ndcSource(p) {
     var meta = (Alpha.state && Alpha.state.ds && Alpha.state.ds.meta) || {};
@@ -77,6 +86,7 @@
       '<dl class="facts">' +
         '<dt>Form</dt><dd>' + show(p.form) + '</dd>' +
         '<dt>NIOSH</dt><dd data-testid="niosh">' + niosh + '</dd>' +
+        '<dt>Schedule</dt><dd data-testid="schedule">' + scheduleText(p) + '</dd>' +
         '<dt>Count</dt><dd>' + show(p.countPerBottle) + '</dd>' +
         '<dt>Safety cap</dt><dd>' + yesNo(p.safetyCap) + '</dd>' +
         '<dt>In robot</dt><dd>' + yesNo(p.robot) + '</dd>' +
