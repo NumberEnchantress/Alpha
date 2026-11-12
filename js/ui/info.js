@@ -63,6 +63,25 @@
     return t + (p.scheduleNote ? ' <span class="tag">CHECK</span> <span class="small muted">' + esc(p.scheduleNote) + '</span>' : '');
   }
 
+  // Substitutes (version-53), from the FDA Orange Book's therapeutic equivalence codes: the other NDCs
+  // here of the same ingredient, form and strength that share an A code with this one.
+  function aCodes(te) { return String(te || '').split(',').map(function (c) { return c.trim(); }).filter(function (c) { return /^A/.test(c); }); }
+  function substitutesHtml(p) {
+    if (p.obDiscontinued) return UNKNOWN + ' <span class="small muted">(the Orange Book lists this product as discontinued)</span>';
+    if (p.te == null) return UNKNOWN + ' <span class="small muted">(not linked to the Orange Book: a biologic, an OTC monograph or unapproved drug, or no match)</span>';
+    var mine = aCodes(p.te);
+    if (!p.te) return 'Not rated <span class="small muted">(the Orange Book gives no TE code: often the only product of its kind)</span>';
+    if (!mine.length) return 'None: not therapeutically equivalent <span class="tag">' + esc(p.te) + '</span>';
+    var all = (Alpha.state && Alpha.state.ds && Alpha.state.ds.products) || [];
+    var subs = all.filter(function (q) { return q !== p && q.ndc !== p.ndc && q.teKey === p.teKey && aCodes(q.te).some(function (c) { return mine.indexOf(c) >= 0; }); });
+    var head = '<span class="tag">' + esc(mine.join(', ')) + '</span>' + (p.rld ? ' <span class="small muted">reference brand</span>' : '') +
+      (p.teNote ? ' <span class="tag">CHECK</span> <span class="small muted">' + esc(p.teNote) + '</span>' : '') + ' ';
+    if (!subs.length) return head + 'none stocked here';
+    return head + '<ul class="subs">' + subs.slice(0, 8).map(function (q) {
+      return '<li>' + esc(Alpha.ui.name(q)) + ' ' + esc(q.manufacturer || '') + ' <span class="ndc small">' + esc(Alpha.ndc.format(q.ndc)) + '</span>' + (q.location ? ' <span class="small muted">at ' + esc(q.location) + '</span>' : '') + '</li>';
+    }).join('') + '</ul>' + (subs.length > 8 ? '<span class="small muted">and ' + (subs.length - 8) + ' more</span>' : '');
+  }
+
   // Where the NDC comes from (version-50): the FDA's directory, or a placeholder that is not a real NDC.
   function ndcSource(p) {
     var meta = (Alpha.state && Alpha.state.ds && Alpha.state.ds.meta) || {};
@@ -89,6 +108,7 @@
         '<dt>Form</dt><dd>' + show(p.form) + '</dd>' +
         '<dt>NIOSH</dt><dd data-testid="niosh">' + niosh + '</dd>' +
         '<dt>Schedule</dt><dd data-testid="schedule">' + scheduleText(p) + '</dd>' +
+        '<dt>Substitutes</dt><dd class="span" data-testid="substitutes">' + substitutesHtml(p) + '</dd>' +
         '<dt>Count</dt><dd>' + show(p.countPerBottle) + '</dd>' +
         '<dt>Safety cap</dt><dd>' + yesNo(p.safetyCap) + '</dd>' +
         '<dt>In robot</dt><dd>' + yesNo(p.robot) + '</dd>' +
