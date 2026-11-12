@@ -65,7 +65,7 @@
 
     var ms = new MiniSearch({
       idField: 'ndc',
-      fields: ['drug', 'brand', 'aka', 'strength', 'form', 'manufacturer', 'schedule'],
+      fields: ['drug', 'brand', 'aka', 'strength', 'form', 'manufacturer', 'schedule', 'flags'],
       tokenize: tokenize,
       processTerm: function (t) { return t; },
       searchOptions: {
@@ -75,14 +75,14 @@
         // Typo tolerance only for words of 4+ letters, never for numbers.
         fuzzy: function (term) { return /^[a-z]{4,}$/.test(term) ? 0.25 : false; },
         combineWith: 'AND',
-        boost: { drug: 3, brand: 3, aka: 2, strength: 2, form: 1, manufacturer: 0.5, schedule: 1 }
+        boost: { drug: 3, brand: 3, aka: 2, strength: 2, form: 1, manufacturer: 0.5, schedule: 1, flags: 1 }
       }
     });
     ms.addAll(products.map(function (p) {
       // the schedule as a word to search by (version-51): "ctwo" ... "cfive" (no word is the start of
       // another, as "cii" is of "ciii"), "controlled" for all four, "otc", "rx"
       var sch = p.schedule ? (SCHED_WORD[p.schedule] || p.schedule.toLowerCase()) + (/^C/.test(p.schedule) ? ' controlled' : '') : '';
-      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', aka: (p.aka || []).join(' '), schedule: sch, strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
+      return { ndc: p.ndc, drug: p.drug, brand: p.brand || '', aka: (p.aka || []).join(' '), schedule: sch, flags: p.niosh === true ? 'hazardous niosh' : '', strength: p.strength || '', form: p.form || '', manufacturer: p.manufacturer || '' };
     }));
 
     function textSearch(q) {
