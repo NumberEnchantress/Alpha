@@ -76,7 +76,9 @@
       return;
     }
     var where = whereText(loc);
-    var niosh = p.niosh === true ? '<span class="yes-hazard">Yes<span class="tag">HAZARDOUS</span></span>' : yesNo(p.niosh);
+    // (version-52: which table of the NIOSH 2024 list, and a note for a local form)
+    var niosh = p.niosh === true ? '<span class="yes-hazard">Yes' + (p.nioshTable ? ' (Table ' + p.nioshTable + ')' : '') + '<span class="tag">HAZARDOUS</span></span>' +
+      (p.nioshNote ? ' <span class="small muted">' + esc(p.nioshNote) + '</span>' : '') : yesNo(p.niosh);
     el.innerHTML =
       '<h2 class="i-head">' + esc(Alpha.ui.name(p)) + ' ' + show(p.strength) + '</h2>' +
       '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' + ndcSource(p) +
