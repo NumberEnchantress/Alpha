@@ -11,8 +11,10 @@
   function pad(s, n) { while (s.length < n) s = '0' + s; return s; }
 
   // Returns the 11-digit (5-4-2) form, or null if the input is not an
-  // unambiguous NDC. Accepts 5-4-2, 4-4-2, 5-3-2 and 5-4-1 hyphenated forms and
-  // plain 11 digits. Plain 10 digits are ambiguous: use tenDigitForms instead.
+  // unambiguous NDC. Accepts hyphenated forms with leading zeros dropped from
+  // any group (5-4-2, 4-4-2, 5-3-2, 5-4-1, and shorter such as 3-3-2; at least
+  // 8 digits) and plain 11 digits. Plain 10 digits are
+  // ambiguous: use tenDigitForms instead.
   function normalize(input) {
     var s = String(input == null ? '' : input).trim().replace(/[\u2010-\u2015\u2212]/g, '-'); // dashes of any kind
     if (/^-|-$/.test(s)) return null;
@@ -22,8 +24,9 @@
     }
     if (parts.length !== 3 || !parts.every(function (p) { return /^\d+$/.test(p); })) return null;
     var a = parts[0], b = parts[1], c = parts[2];
-    var shape = a.length + '-' + b.length + '-' + c.length;
-    if (shape === '5-4-2' || shape === '4-4-2' || shape === '5-3-2' || shape === '5-4-1') {
+    // Leading zeros may be dropped from any group: each is padded to 5-4-2. At
+    // least 8 digits, so short dashed numbers (dates, codes) are not taken for NDCs.
+    if (a.length <= 5 && b.length <= 4 && c.length <= 2 && (a + b + c).length >= 8) {
       return pad(a, 5) + pad(b, 4) + pad(c, 2);
     }
     return null;

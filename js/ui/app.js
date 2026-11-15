@@ -15,7 +15,7 @@
   function chooseDataset() {
     var sets = window.ALPHA_DATASETS || {};
     var imported = Alpha.settings && Alpha.settings.importedDataset ? Alpha.settings.importedDataset() : null;
-    // The default is a pharmacy layout with simulated stock (data/sim);
+    // The default is drug list v1 (data/sim);
     // ?dataset=sample opens the fictional sample the tests are written for.
     var askSample = /[?&]dataset=sample(&|$)/.test(location.search || '');
     return imported || sets.real || (askSample ? sets.sample : null) || sets.sim || sets.sample || null;
@@ -29,9 +29,10 @@
     S.index = Alpha.search.createIndex(S.ds.products || []);
     $('dataset-name').textContent = S.ds.meta.name;
     var banner = $('sample-banner');
-    banner.hidden = !S.ds.meta.sample && !S.ds.meta.layoutIsSample;
+    banner.hidden = !S.ds.meta.sample && !S.ds.meta.layoutIsSample && !S.ds.meta.drugList;
     // (version-49: since version-48 the drugs, makers and NDCs are real; the shelf places and stock are not)
-    banner.textContent = S.ds.meta.sample && S.ds.meta.layoutBuiltIn ? (S.ds.meta.publicNdcs ? 'SIMULATED STOCK: shelf locations and stock are made up. Not for dispensing.' : 'SIMULATED STOCK: drugs and NDCs are made up, not for dispensing')
+    banner.textContent = S.ds.meta.drugList ? 'DRUG LIST v1: prototype, may contain inaccuracies.'
+      : S.ds.meta.sample && S.ds.meta.layoutBuiltIn ? (S.ds.meta.publicNdcs ? 'SIMULATED STOCK: shelf locations and stock are made up. Not for dispensing.' : 'SIMULATED STOCK: drugs and NDCs are made up, not for dispensing')
       : S.ds.meta.sample ? 'SAMPLE DATA: fictional, not for dispensing'
       : 'Imported products on the SAMPLE layout: map and shelf positions are not real';
     Alpha.map.init($('map'), S.ds.layout);

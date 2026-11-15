@@ -76,16 +76,19 @@
     var subs = all.filter(function (q) { return q !== p && q.ndc !== p.ndc && q.teKey === p.teKey && aCodes(q.te).some(function (c) { return mine.indexOf(c) >= 0; }); });
     var head = '<span class="tag">' + esc(mine.join(', ')) + '</span>' + (p.rld ? ' <span class="small muted">reference brand</span>' : '') +
       (p.teNote ? ' <span class="tag">CHECK</span> <span class="small muted">' + esc(p.teNote) + '</span>' : '') + ' ';
-    if (!subs.length) return head + 'none stocked here';
+    if (!subs.length) return head + 'none in this list';
     return head + '<ul class="subs">' + subs.slice(0, 8).map(function (q) {
       return '<li>' + esc(Alpha.ui.name(q)) + ' ' + esc(q.manufacturer || '') + ' <span class="ndc small">' + esc(Alpha.ndc.format(q.ndc)) + '</span>' + (q.location ? ' <span class="small muted">at ' + esc(q.location) + '</span>' : '') + '</li>';
     }).join('') + '</ul>' + (subs.length > 8 ? '<span class="small muted">and ' + (subs.length - 8) + ' more</span>' : '');
   }
 
   // Where the NDC comes from (version-50): the FDA's directory, or a placeholder that is not a real NDC.
+  // Drug list v1: nothing is said here.
   function ndcSource(p) {
     var meta = (Alpha.state && Alpha.state.ds && Alpha.state.ds.meta) || {};
-    var text = Alpha.ndc.isFakeLabeler(p.ndc) ? 'Placeholder, not a real NDC' : meta.publicNdcs ? 'NDC from the FDA NDC Directory' : '';
+    var text = Alpha.ndc.isFakeLabeler(p.ndc) ? 'Placeholder, not a real NDC'
+      : meta.drugList ? ''
+      : meta.publicNdcs ? 'NDC from the FDA NDC Directory' : '';
     return text ? '<div class="i-ndc-src small muted" data-testid="ndc-source">' + esc(text) + '</div>' : '';
   }
 
