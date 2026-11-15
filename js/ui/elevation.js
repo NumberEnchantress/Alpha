@@ -37,16 +37,47 @@
     s += '<defs><pattern id="ehatch" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
       '<rect width="3" height="3" fill="#fff3a8"/><rect width="1.3" height="3" fill="#e0b400"/></pattern></defs>';
     s += '<rect class="e-frame' + (fridge ? ' fridge' : '') + '" x="' + (left - 2) + '" y="' + (top - 2) + '" width="' + (right - left + 4) + '" height="' + (n * rowH + 4) + '" rx="' + (fridge ? 3 : 0.5) + '"/>';
+    var onShelf = bottlesByShelf(u);
     for (var i = 1; i <= n; i++) {
       var y = top + (i - 1) * rowH;
       s += '<g class="shelf" data-shelf="' + i + '" data-y="' + y + '" data-h="' + rowH + '">' +
         '<rect class="s-box" x="' + left + '" y="' + y + '" width="' + (right - left) + '" height="' + rowH + '"/>' +
         '<rect class="s-plank" x="' + left + '" y="' + (y + rowH - 1.2) + '" width="' + (right - left) + '" height="1.2"/>' +
+        bottles(onShelf[i] || [], left + 1, right - 1, y, rowH) +
         '<text class="s-num" x="' + (left - 4.5) + '" y="' + (y + rowH / 2) + '" font-size="' + Math.min(7, rowH * 0.6) + '">' + i + '</text>' +
         '</g>';
     }
     if (fridge) s += '<rect class="e-handle" x="' + (right + 0.2) + '" y="' + (top + n * rowH * 0.3) + '" width="1.6" height="' + (n * rowH * 0.4) + '" rx="0.8"/>';
     return s + '</svg>';
+  }
+
+  // The products placed on each shelf of a unit (known shelf only), A-Z: one bottle is drawn for each
+  // product (each NDC), so a shelf never looks empty when the data puts drugs on it.
+  function bottlesByShelf(u) {
+    var ds = Alpha.state && Alpha.state.ds, out = {};
+    if (!ds) return out;
+    ds.products.forEach(function (p) {
+      if (p.shelf == null) return;
+      var r = Alpha.locate.locate(p, ds.layout);
+      if (r.unit === u && r.shelfStatus === 'known') (out[r.shelf] = out[r.shelf] || []).push(p);
+    });
+    Object.keys(out).forEach(function (k) {
+      out[k].sort(function (a, b) { var x = Alpha.locate.alphaKey(a.drug), y = Alpha.locate.alphaKey(b.drug); return x < y ? -1 : x > y ? 1 : 0; });
+    });
+    return out;
+  }
+  // Bottles standing on the plank, spread across the shelf; each says what it is on hover.
+  function bottles(list, x0, x1, y, rowH) {
+    if (!list.length) return '';
+    var gap = 0.6, bw = Math.min(5, (x1 - x0 - (list.length - 1) * gap) / list.length), bh = rowH * 0.62;
+    var base = y + rowH - 1.2, s = '';
+    list.forEach(function (p, k) {
+      var x = x0 + k * (bw + gap);
+      s += '<g class="s-bottle" data-ndc="' + esc(p.ndc) + '"><title>' + esc(Alpha.ui.name(p) + (p.strength ? ' ' + p.strength : '') + ' · ' + Alpha.ndc.format(p.ndc)) + '</title>' +
+        '<rect class="b-body" x="' + x.toFixed(2) + '" y="' + (base - bh * 0.82).toFixed(2) + '" width="' + bw.toFixed(2) + '" height="' + (bh * 0.82).toFixed(2) + '" rx="' + Math.min(0.8, bw / 4).toFixed(2) + '"/>' +
+        '<rect class="b-cap" x="' + (x + bw * 0.2).toFixed(2) + '" y="' + (base - bh).toFixed(2) + '" width="' + (bw * 0.6).toFixed(2) + '" height="' + (bh * 0.18).toFixed(2) + '"/></g>';
+    });
+    return s;
   }
 
   // Text drawn on the shelf is at least this many screen pixels; a label
@@ -72,8 +103,12 @@
   // Highlights the shelf and writes the drug (and ESTIMATED) on it.
   // Returns false when the label would be under MIN_PX and was left off.
   function mark(svg, loc, p) {
-    var old = svg.querySelectorAll('.shelf-hi, .shelf-est');
-    for (var i = 0; i < old.length; i++) old[i].classList.remove('shelf-hi', 'shelf-est');
+    var old = svg.querySelectorAll('.shelf-hi, .shelf-est, .bottle-hi');
+    for (var i = 0; i < old.length; i++) old[i].classList.remove('shelf-hi', 'shelf-est', 'bottle-hi');
+    if (p) {
+      var bot = svg.querySelector('.s-bottle[data-ndc="' + p.ndc + '"]');
+      if (bot) bot.classList.add('bottle-hi');
+    }
     var labels = svg.querySelectorAll('.s-label, .s-est');
     for (var j = 0; j < labels.length; j++) labels[j].parentNode.removeChild(labels[j]);
     if (loc.browse) {

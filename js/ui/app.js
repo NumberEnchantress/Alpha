@@ -223,6 +223,7 @@
   /* ---------- a section chosen on the map ---------- */
   // The shelf view shows it with nothing highlighted, and the info pane
   // lists what it holds (each one chooses that product).
+  var browseAll = null; // the section whose whole list is shown ("code|unit")
   function browse(code, unitId) {
     var L = S.ds.layout.locations.filter(function (l) { return l.code === code; })[0];
     if (!L) return;
@@ -234,12 +235,17 @@
     var here = S.ds.products.filter(function (p) { return p.location === code && Alpha.locate.locate(p, S.ds.layout).unit === U; })
       .sort(function (a, b) { return Alpha.locate.alphaKey(a.drug) < Alpha.locate.alphaKey(b.drug) ? -1 : Alpha.locate.alphaKey(a.drug) > Alpha.locate.alphaKey(b.drug) ? 1 : 0; });
     var name = L.code + (L.name && L.name !== L.code ? ' · ' + L.name : '') + (L.units.length > 1 ? ' · ' + (U.label || U.id) : '');
-    var MAX = 60, shown = here.slice(0, MAX);
+    // The first 60 by name at once (fast); "Show all" lists the rest.
+    var MAX = 60, all = browseAll === code + '|' + U.id, shown = all ? here : here.slice(0, MAX);
     $('info').innerHTML = '<h2 class="browse-title">' + esc(name) + '</h2>' +
-      '<p>' + (here.length ? here.length + (here.length === 1 ? ' product is' : ' products are') + ' placed here' + (here.length > MAX ? ' (the first ' + MAX + ' by name below)' : '') + '. Choose one to see its shelf.' : 'No product in the data is placed here.') + '</p>' +
+      '<p>' + (here.length ? here.length + (here.length === 1 ? ' product is' : ' products are') + ' placed here' + (here.length > shown.length ? ' (the first ' + MAX + ' by name below)' : '') + '. Choose one to see its shelf.' : 'No product in the data is placed here.') + '</p>' +
       (shown.length ? '<ul class="browse-list">' + shown.map(function (p) {
         return '<li><button type="button" class="btn small" data-ndc="' + esc(p.ndc) + '">' + esc(Alpha.ui.name(p) + (p.strength ? ' ' + p.strength : '') + (p.form ? ' ' + p.form : '')) + '</button> <span class="ndc small muted">' + esc(Alpha.ndc.format(p.ndc)) + '</span></li>';
-      }).join('') + '</ul>' : '');
+      }).join('') + '</ul>' : '') +
+      (here.length > shown.length ? '<p><button type="button" class="btn small" id="browse-all">Show all ' + here.length + '</button></p>' : '');
+    var more = $('browse-all');
+    if (more) more.addEventListener('click', function () { browseAll = code + '|' + U.id; browse(code, unitId); });
+    else if (!all) browseAll = null;
     $('status').textContent = 'Showing ' + name + ' from the map.';
   }
 

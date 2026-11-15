@@ -135,6 +135,12 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .elev .shelf-hi .s-num, .elev .shelf-est .s-num { fill: #000; font-size: 8px; }
 .elev .s-label { font-weight: 800; fill: #000; }
 .elev .s-est { font-weight: 800; fill: #000; letter-spacing: .03em; }
+/* one bottle per product on each shelf; the chosen product's bottle is yellow */
+.elev .s-bottle .b-body { fill: #e3ebf5; stroke: #56657a; stroke-width: .3; }
+.elev .s-bottle .b-cap { fill: #56657a; }
+.elev .s-bottle.bottle-hi .b-body { fill: #ffd400; stroke: #000; stroke-width: .8; }
+.elev .s-bottle.bottle-hi .b-cap { fill: #000; }
+.elev .s-label, .elev .s-est { paint-order: stroke; stroke: rgba(255, 255, 255, .85); stroke-width: .9; }
 
 /* Dialogs */
 .dialog { border: 2px solid #333; border-radius: 10px; padding: 1rem 1.2rem; max-width: min(40rem, 95vw); max-height: 90vh; overflow: auto; }
