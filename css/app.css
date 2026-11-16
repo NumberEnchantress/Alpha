@@ -140,6 +140,11 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .elev .s-bottle .b-cap { fill: #56657a; }
 .elev .s-bottle.bottle-hi .b-body { fill: #ffd400; stroke: #000; stroke-width: .8; }
 .elev .s-bottle.bottle-hi .b-cap { fill: #000; }
+/* bottle labels: brand or drug, strength, maker (lines that would be under 11px are left off) */
+.elev .s-bottle .b-label { fill: #fff; stroke: #9aa7b8; stroke-width: .2; }
+.elev .s-bottle .b-text { fill: #1d2733; font-weight: 600; }
+.elev .s-bottle .b-text.b-name { font-weight: 800; fill: #000; }
+.elev .s-bottle.bottle-hi .b-label { stroke: #000; stroke-width: .35; }
 .elev .s-label, .elev .s-est { paint-order: stroke; stroke: rgba(255, 255, 255, .85); stroke-width: .9; }
 
 /* Dialogs */
@@ -310,3 +315,10 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 .browse-list { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .browse-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; }
 .browse-list .ndc { font-family: var(--mono); }
+/* the chosen shelf's bottles, readable in full under the drawing */
+.elev-shelf { margin: .2rem .6rem .4rem; font-size: .9rem; line-height: 1.35; }
+.elev-shelf summary { cursor: pointer; color: var(--muted); }
+.elev-shelf ol { margin: .2rem 0 0; padding-left: 1.4rem; }
+.elev-shelf li.mine { font-weight: 800; background: var(--hi); }
+.elev-shelf .es-name { font-weight: 700; }
+.elev-shelf .es-meta { color: var(--muted); }
