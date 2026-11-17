@@ -162,6 +162,8 @@
       case 'W': p = [r.x - gap, r.y + r.h / 2]; break;
       case 'E': p = [r.x + r.w + gap, r.y + r.h / 2]; break;
     }
+    // u.stand slides the marker along the face (a section in a corner, so it clears its neighbour)
+    if (p && u.stand) { if (u.face === 'N' || u.face === 'S') p[0] += u.stand; else p[1] += u.stand; }
     return p && turnPoint(r, p);
   }
 
