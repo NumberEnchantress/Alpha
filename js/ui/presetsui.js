@@ -309,10 +309,10 @@
   function swatches(p, g) {
     var byId = Object.create(null);
     p.colours.forEach(function (c) { byId[c.id] = c; });
-    return g.baskets.map(function (b) {
+    return '<span class="stack" aria-hidden="true">' + g.baskets.map(function (b) {
       var c = byId[b] || { name: b, hex: '#ffffff' };
-      return '<span class="swatch" style="background:' + (/^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff') + '" aria-hidden="true"></span>';
-    }).join('') + ' ' + g.baskets.map(function (b) { return esc((byId[b] || { name: b }).name); }).join(' + ');
+      return '<span class="swatch" style="background:' + (/^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff') + '"></span>';
+    }).join('') + '</span> ' + g.baskets.map(function (b) { return esc((byId[b] || { name: b }).name); }).join(' + ');
   }
 
   function listHtml(ds) {
@@ -349,7 +349,7 @@
   function basketCell(i, b, value, colours) {
     var opts = (b === 1 ? '<option value="' + NONE + '"' + (value ? '' : ' selected') + '>none</option>' : '') +
       colours.map(function (c) { return '<option value="' + esc(c.id) + '"' + (value === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('');
-    return '<select data-i="' + i + '" data-f="b' + b + '" aria-label="Group ' + (i + 1) + ' basket ' + (b + 1) + '">' + opts + '</select> ' +
+    return '<select data-i="' + i + '" data-f="b' + b + '" aria-label="Group ' + (i + 1) + (b ? ' bottom' : ' top') + ' basket">' + opts + '</select> ' +
       '<span class="swatch" id="sw-' + i + '-' + b + '" aria-hidden="true" style="background:' + hexOf(colours, value) + '"></span>';
   }
   function hexOf(colours, id) {
@@ -361,7 +361,7 @@
     var d = editing.draft, choices = labelChoices(ds), colours = colourChoices(d);
     return '<fieldset class="preset-editor"><legend>' + (editing.origId ? 'Edit preset' : 'New preset') + '</legend>' +
       '<label>Name <input type="text" id="pe-name" data-max="' + P.MAX_NAME + '" value="' + esc(d.name) + '" placeholder="e.g. 9 baskets"></label>' +
-      '<table class="pe-table"><thead><tr><th>#</th><th>Group label</th><th>Basket 1</th><th>Basket 2</th><th><span class="sr">Remove</span></th></tr></thead><tbody>' +
+      '<table class="pe-table"><thead><tr><th>#</th><th>Group label</th><th>Top basket</th><th>Bottom basket</th><th><span class="sr">Remove</span></th></tr></thead><tbody>' +
       d.groups.map(function (g, i) {
         return '<tr><td>' + (i + 1) + '</td><td>' + labelCell(i, g, choices) + '</td><td>' + basketCell(i, 0, g.baskets[0], colours) + '</td>' +
           '<td>' + basketCell(i, 1, g.baskets[1] || '', colours) + '</td>' +

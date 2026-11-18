@@ -35,8 +35,9 @@
       var sw = g.baskets.map(function (b) {
         var c = colours[b] || { name: b, hex: '#ffffff' };
         var hex = /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff'; // only plain colours reach style=
-        return '<span class="swatch" style="background:' + hex + '" aria-hidden="true"></span>';
+        return '<span class="swatch" style="background:' + hex + '"></span>';
       }).join('');
+      sw = '<span class="stack" aria-hidden="true">' + sw + '</span>'; // first basket on top, as the baskets are stacked
       var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
       return '<li><strong>' + esc(g.label) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
     }).join('');
