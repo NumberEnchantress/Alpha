@@ -1,4 +1,4 @@
-/* Settings: basket preset, text size, which rules are on, and rules the
+/* Settings: basket preset, text size, theme, which rules are on, and rules the
    user adds here. Saved in localStorage when the browser allows it;
    otherwise they last until the page is closed. */
 (function (Alpha) {
@@ -10,8 +10,9 @@
     known: 'is known', unknown: 'is unknown'
   };
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
+  var THEMES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']];
 
-  var prefs = { scheme: null, scale: '1', disabled: {}, custom: [] };
+  var prefs = { scheme: null, scale: '1', theme: 'system', disabled: {}, custom: [] };
   var extra = {}, saved = true, usable = true, unreadable = false, backupKey = null, notice = null, hooks = {}, dlg = null;
 
   // Saved settings that cannot be read (or hold values of the wrong kind) are
@@ -51,11 +52,13 @@
     if (p) {
       prefs.scheme = p.scheme || null;
       prefs.scale = SCALES.some(function (s) { return s[0] === p.scale; }) ? p.scale : '1';
+      // a theme this version does not know (or none) means System
+      prefs.theme = THEMES.some(function (s) { return s[0] === p.theme; }) ? p.theme : 'system';
       prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
       // Fields this version does not use (a later version's, or added by hand) are kept as they are.
       extra = {};
-      Object.keys(p).forEach(function (k) { if (['scheme', 'scale', 'disabled', 'custom'].indexOf(k) < 0) extra[k] = p[k]; });
+      Object.keys(p).forEach(function (k) { if (['scheme', 'scale', 'theme', 'disabled', 'custom'].indexOf(k) < 0) extra[k] = p[k]; });
     }
   }
   function save() {
@@ -68,6 +71,19 @@
   }
   usable = store.usable(); saved = usable; // false when the browser blocks storage
   function applyScale() { document.documentElement.style.setProperty('--scale', prefs.scale); document.documentElement.setAttribute('data-scale', prefs.scale); }
+  // data-theme on <html> is always "light" or "dark": the choice, or with
+  // System the browser's setting, followed while the page is open. The
+  // script at the top of index.html sets it first, so the page never
+  // shows light before dark.
+  var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function applyTheme() {
+    var t = prefs.theme === 'light' || prefs.theme === 'dark' ? prefs.theme : (darkMq && darkMq.matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', t);
+  }
+  if (darkMq) {
+    var onSystem = function () { if (prefs.theme === 'system') applyTheme(); };
+    if (darkMq.addEventListener) darkMq.addEventListener('change', onSystem); else if (darkMq.addListener) darkMq.addListener(onSystem);
+  }
 
   // The basket preset in use: built-in (data file) or the user's own.
   function scheme(ds) {
@@ -150,6 +166,10 @@
       return '<label class="opt inline"><input type="radio" name="scale" value="' + s[0] + '"' + (prefs.scale === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>';
     }).join('') + '</fieldset>';
 
+    h += '<fieldset><legend>Theme</legend>' + THEMES.map(function (s) {
+      return '<label class="opt inline"><input type="radio" name="theme" value="' + s[0] + '"' + (prefs.theme === s[0] ? ' checked' : '') + '> ' + s[1] + '</label>';
+    }).join('') + '<p class="muted small">System follows the light or dark setting of this computer.</p></fieldset>';
+
     var all = (ds.rules || []).map(function (r) { return { r: r, custom: false }; })
       .concat(prefs.custom.map(function (r) { return { r: r, custom: true }; }));
     h += '<fieldset><legend>Warning rules</legend><ul class="rule-list">' + all.map(function (x) {
@@ -209,12 +229,13 @@
     build();
   }
 
-  function changed() { applyScale(); if (hooks.onChange) hooks.onChange(); }
+  function changed() { applyScale(); applyTheme(); if (hooks.onChange) hooks.onChange(); }
 
   function onDialogEvent(e) {
     var t = e.target, wasSaved = saved;
     if (t.name === 'scheme') { prefs.scheme = t.value; save(); changed(); }
     else if (t.name === 'scale') { prefs.scale = t.value; save(); changed(); }
+    else if (t.name === 'theme') { prefs.theme = t.value; save(); applyTheme(); } // colours only: nothing to draw again
     else if (t.hasAttribute && t.hasAttribute('data-rule')) {
       var id = t.getAttribute('data-rule');
       if (t.checked) delete prefs.disabled[id]; else prefs.disabled[id] = true;
@@ -283,6 +304,7 @@
 
   load();
   applyScale();
+  applyTheme();
   Alpha.settings = {
     savedOk: function () { return saved; },
     init: init, open: open, scheme: scheme, schemeProblem: schemeProblem, useScheme: useScheme, notify: changed, disabledRules: disabledRules, customRules: customRules,

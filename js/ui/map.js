@@ -81,7 +81,7 @@
     parts.push('<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + (-k) + ' ' + (-k) + ' ' + (W + 2 * k) + ' ' + (D + 2 * k) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Floor map of ' + esc(lay.name) + '">');
     var hw = 1.6 * k;
     parts.push('<defs><pattern id="hatch" width="' + hw + '" height="' + hw + '" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
-      '<rect width="' + hw + '" height="' + hw + '" fill="#fff3a8"/><rect width="' + hw * 0.45 + '" height="' + hw + '" fill="#e0b400"/></pattern></defs>');
+      '<rect width="' + hw + '" height="' + hw + '" class="hatch-a"/><rect width="' + hw * 0.45 + '" height="' + hw + '" class="hatch-b"/></pattern></defs>');
     parts.push('<rect class="floor" x="0" y="0" width="' + W + '" height="' + D + '"/>');
     (lay.features || []).forEach(function (f) {
       var r = f.rect;

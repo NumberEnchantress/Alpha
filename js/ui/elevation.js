@@ -35,7 +35,7 @@
     var s = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMin meet" data-unit="' + esc(u.id) + '" role="img" data-base-label="' +
       esc((u.label || u.id) + ', ' + n + ' shelves, numbered from the top') + '">';
     s += '<defs><pattern id="ehatch" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
-      '<rect width="3" height="3" fill="#fff3a8"/><rect width="1.3" height="3" fill="#e0b400"/></pattern></defs>';
+      '<rect width="3" height="3" class="hatch-a"/><rect width="1.3" height="3" class="hatch-b"/></pattern></defs>';
     s += '<rect class="e-frame' + (fridge ? ' fridge' : '') + '" x="' + (left - 2) + '" y="' + (top - 2) + '" width="' + (right - left + 4) + '" height="' + (n * rowH + 4) + '" rx="' + (fridge ? 3 : 0.5) + '"/>';
     for (var i = 1; i <= n; i++) {
       var y = top + (i - 1) * rowH;
