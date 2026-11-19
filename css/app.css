@@ -115,6 +115,16 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* Search */
 .search { padding: .6rem .7rem .3rem; }
 .search-label { display: block; font-weight: 600; margin-bottom: .25rem; }
+/* The stages chosen so far (drug, form, strength): a click goes back to that stage. */
+.chips { list-style: none; margin: 0 0 .3rem; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
+.chips li { display: flex; align-items: center; gap: .25rem; min-width: 0; }
+.chips li + li::before { content: "›" / ""; color: var(--muted); font-weight: 700; }
+.chip { font: inherit; font-size: .9rem; line-height: 1.25; padding: .1rem .45rem; border: 2px solid var(--btn-line); background: var(--info-bg); color: var(--ink); border-radius: 999px; min-width: 0; text-align: left; }
+button.chip { cursor: pointer; }
+button.chip:hover { border-color: var(--sel-line); }
+.chip.auto { border-style: dashed; background: transparent; }
+.chip-k { font-size: .78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.chip-x { font-weight: 700; margin-left: .1rem; }
 #q { width: 100%; font: inherit; font-size: 1.35rem; padding: .4rem .55rem; border: 2px solid var(--field-line); border-radius: 6px; }
 #q:focus { outline: 3px solid var(--focus); outline-offset: 1px; }
 .status { min-height: 1.3em; color: var(--muted); font-size: .9rem; margin-top: .2rem; }

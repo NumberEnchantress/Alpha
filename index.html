@@ -36,7 +36,8 @@
 
   <aside class="pane pane-side">
     <div class="search" role="search">
-      <label for="q" class="search-label">Drug and strength, or NDC</label>
+      <label for="q" class="search-label" id="q-label">Drug and strength, or NDC</label>
+      <ol id="chips" class="chips" aria-label="Chosen so far" hidden></ol>
       <input id="q" type="text" autocomplete="off" spellcheck="false" autofocus
              role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="results"
              placeholder="e.g. atorva 40">
@@ -55,7 +56,8 @@
   <table class="keys">
     <tr><td><kbd>type</kbd></td><td>search (focus jumps to the search box)</td></tr>
     <tr><td><kbd>↓</kbd> <kbd>↑</kbd></td><td>move through results</td></tr>
-    <tr><td><kbd>Enter</kbd></td><td>choose; the search text is selected for the next search</td></tr>
+    <tr><td><kbd>Enter</kbd> <kbd>Tab</kbd></td><td>choose: a drug, then its form, strength and NDC (a stage with one choice is passed over); on a product, the search text is selected for the next search</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd>, <kbd>Backspace</kbd></td><td>in an empty box: back to the stage before</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>clear the search</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help (when not typing)</td></tr>
     <tr><td><kbd>,</kbd></td><td>settings (when not typing)</td></tr>
