@@ -64,14 +64,15 @@
 
   function renderResults(r, q) {
     var list = $('results');
-    var html = '';
+    var html = '', scheme = Alpha.settings.scheme(S.ds), locs = S.ds.layout && S.ds.layout.locations;
     for (var i = 0; i < S.results.length; i++) {
       var p = S.results[i].product;
       var cls = 'result' + (i < 3 ? ' top3' : '') + (i === 3 ? ' after-top3' : '');
       html += '<li id="r' + i + '" class="' + cls + '" role="option" aria-selected="' + (i === S.active) + '" data-i="' + i + '">' +
         '<span class="r-num">' + (i + 1) + '</span>' +
         '<span class="r-name">' + esc(ui.name(p)) + ' ' + ui.show(p.strength) + (p.form ? ' <span class="r-meta">' + esc(p.form) + '</span>' : '') +
-          (S.results[i].typo ? ' <span class="r-typo">different spelling: check the name</span>' : '') + '</span>' +
+          (S.results[i].typo ? ' <span class="r-typo">different spelling: check the name</span>' : '') +
+          (scheme ? Alpha.info.basketTag(scheme, p, locs) : '') + '</span>' +
         '<span class="r-meta"><span class="ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</span> · ' +
           (p.location != null ? esc(p.location) : 'location unknown') + ' · ' + ui.show(p.manufacturer) + '</span>' +
         '</li>';
@@ -143,8 +144,20 @@
     input.select();
   }
 
+  // The listed results' basket tags, after the preset changed (the list itself stays).
+  function retagResults() {
+    var scheme = Alpha.settings.scheme(S.ds), locs = S.ds.layout && S.ds.layout.locations, items = $('results').children;
+    for (var i = 0; i < items.length && i < S.results.length; i++) {
+      var name = items[i].querySelector('.r-name'), old = name && name.querySelector('.basket-tag');
+      if (old) old.remove();
+      var tag = scheme ? Alpha.info.basketTag(scheme, S.results[i].product, locs) : '';
+      if (name && tag) name.insertAdjacentHTML('beforeend', tag);
+    }
+  }
+
   function refresh() {
     compileRules();
+    retagResults();
     Alpha.info.renderBaskets($('baskets'), Alpha.settings.scheme(S.ds), Alpha.settings.schemeProblem(S.ds));
     choose(S.product);
   }

@@ -27,17 +27,37 @@
     return ['20', '40', '60'].map(function (k) { return k + ' dr: ' + show(v[k]); }).join(' · ');
   }
 
-  function basketKey(scheme, problem) {
-    if (!scheme) return '';
+  function colourMap(scheme) {
     var colours = Object.create(null);
     scheme.colours.forEach(function (c) { colours[c.id] = c; });
+    return colours;
+  }
+  // A group's baskets, first (top) basket above the second, as the baskets are stacked.
+  function stackHtml(colours, g) {
+    return '<span class="stack" aria-hidden="true">' + g.baskets.map(function (b) {
+      var c = colours[b] || { name: b, hex: '#ffffff' };
+      var hex = /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff'; // only plain colours reach style=
+      return '<span class="swatch" style="background:' + hex + '"></span>';
+    }).join('') + '</span>';
+  }
+  // The chosen preset's group for one product, as a small stacked swatch and the
+  // group's label; nothing when no preset is in use or no group matches (no guess).
+  function basketTag(scheme, product, locations) {
+    var g = scheme && Alpha.presets && Alpha.presets.groupFor(scheme, product, locations);
+    if (!g) return '';
+    var colours = colourMap(scheme);
+    var names = g.baskets.map(function (b) { return (colours[b] || { name: b }).name; });
+    var title = 'Baskets: ' + names[0] + (names.length > 1 ? ' (top) + ' + names[1] + ' (bottom)' : '');
+    return '<span class="basket-tag" data-testid="basket" title="' + esc(title) + '">' + stackHtml(colours, g) +
+      '<span class="b-label">' + esc(g.label) + '</span><span class="visually-hidden"> (' + esc(names.join(' + ')) + ')</span></span>';
+  }
+
+  function basketKey(scheme, problem) {
+    // With no preset in use nothing is shown, unless a chosen preset is missing.
+    if (!scheme) return problem ? '<p class="warning warn" role="alert"><span class="sev">Warning</span>' + esc(problem) + '</p>' : '';
+    var colours = colourMap(scheme);
     var items = scheme.groups.map(function (g) {
-      var sw = g.baskets.map(function (b) {
-        var c = colours[b] || { name: b, hex: '#ffffff' };
-        var hex = /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff'; // only plain colours reach style=
-        return '<span class="swatch" style="background:' + hex + '"></span>';
-      }).join('');
-      sw = '<span class="stack" aria-hidden="true">' + sw + '</span>'; // first basket on top, as the baskets are stacked
+      var sw = stackHtml(colours, g);
       var names = g.baskets.map(function (b) { return esc((colours[b] || { name: b }).name); }).join(' + ');
       return '<li><strong>' + esc(g.label) + '</strong>' + sw + '<span class="basket-names">' + names + '</span></li>';
     }).join('');
@@ -103,7 +123,8 @@
     var niosh = p.niosh === true ? '<span class="yes-hazard">Yes' + (p.nioshTable ? ' (Table ' + p.nioshTable + ')' : '') + '<span class="tag">HAZARDOUS</span></span>' +
       (p.nioshNote ? ' <span class="small muted">' + esc(p.nioshNote) + '</span>' : '') : yesNo(p.niosh);
     el.innerHTML =
-      '<h2 class="i-head">' + esc(Alpha.ui.name(p)) + ' ' + show(p.strength) + '</h2>' +
+      '<h2 class="i-head">' + esc(Alpha.ui.name(p)) + ' ' + show(p.strength) +
+        basketTag(Alpha.settings && Alpha.settings.scheme(Alpha.state.ds), p, Alpha.state.ds && Alpha.state.ds.layout && Alpha.state.ds.layout.locations) + '</h2>' +
       '<div class="i-ndc">' + esc(Alpha.ndc.format(p.ndc)) + '</div>' + ndcSource(p) +
       '<div class="i-loc ' + where.cls + '" data-testid="where">' + esc(where.text) + '</div>' +
       warningsHtml(warnings) +
@@ -127,5 +148,5 @@
   // The basket key only changes with the scheme, so it is rendered apart.
   function renderBaskets(el, scheme, problem) { el.innerHTML = basketKey(scheme, problem); }
 
-  Alpha.info = { render: render, renderBaskets: renderBaskets, whereText: whereText };
+  Alpha.info = { render: render, renderBaskets: renderBaskets, whereText: whereText, basketTag: basketTag };
 })(window.Alpha);

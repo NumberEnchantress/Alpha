@@ -15,6 +15,15 @@
   var MAX_NAME = 60, MAX_LABEL = 40, MAX_COLOUR_NAME = 24, MAX_FILE_BYTES = 256 * 1024;
   var MIN_COLOUR_DISTANCE = 70; // RGB distance below which two colours look alike
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
+  // Optional per group (2026-11-18): which products belong to it. Exactly one of
+  //   { flag: 'niosh' }      products on the NIOSH list (niosh === true)
+  //   { location: '070' }    products at that location code
+  //   { kind: 'robot' }      products at a location of that kind
+  // The first group that matches wins, in this order: flags, then location
+  // codes, then kinds (so BC [70], location 070 of kind alpha, wins over Alpha).
+  // A group without one is a label only; a product that matches no group has none.
+  var MATCH_ORDER = ['flag', 'location', 'kind'];
+  var MATCH_FLAGS = ['niosh'], MATCH_KINDS = ['alpha', 'fm', 'ref', 'otc', 'robot', 'other'];
 
   // Colours offered in the editor, besides any a preset already uses.
   var COLOUR_CHOICES = [
@@ -245,7 +254,7 @@
     var groups = p.groups;
     if (groups.length < MIN_GROUPS) errors.push('A preset needs at least ' + MIN_GROUPS + ' groups (it has ' + groups.length + ').');
     if (groups.length > MAX_GROUPS) { errors.push('A preset can have at most ' + MAX_GROUPS + ' groups (it has ' + groups.length + ').'); return errors; }
-    var labels = map(), labelText = map(), combos = map();
+    var labels = map(), labelText = map(), combos = map(), matches = map();
     groups.forEach(function (g, i) {
       var n = 'Group ' + (i + 1);
       if (!g || typeof g !== 'object') { errors.push(n + ' is not a group.'); return; }
@@ -264,6 +273,13 @@
       if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
       var ok = true;
       b.forEach(function (id) { if (!colours[id]) { ok = false; errors.push(n + ' uses a colour that is not in the preset ("' + id + '").'); } });
+      var mp = matchProblem(g.match);
+      if (mp) errors.push(n + ': ' + mp);
+      else if (g.match != null) {
+        var mk = matchKey(g.match);
+        if (matches[mk]) errors.push(n + ' matches the same products as group ' + matches[mk] + '.');
+        else matches[mk] = i + 1;
+      }
       if (!ok || !b.length) return;
       // What staff see is the colours, so compare by colour, in order.
       var key = b.map(function (id) { return colours[id].hex.toLowerCase(); }).join('+');
@@ -271,6 +287,39 @@
       else combos[key] = i + 1;
     });
     return errors;
+  }
+
+  // What is wrong with a group's match, or null (none is fine).
+  function matchProblem(m) {
+    if (m == null) return null;
+    var keys = m && typeof m === 'object' && !Array.isArray(m) ? Object.keys(m) : [];
+    if (keys.length !== 1 || MATCH_ORDER.indexOf(keys[0]) < 0 || !isStr(m[keys[0]]))
+      return 'match must be one of { "flag": "niosh" }, { "location": "<code>" } or { "kind": "<kind>" }.';
+    var k = keys[0], v = m[k];
+    if (k === 'flag' && MATCH_FLAGS.indexOf(v) < 0) return 'the match flag "' + v.slice(0, 20) + '" is not known (' + MATCH_FLAGS.join(', ') + ').';
+    if (k === 'kind' && MATCH_KINDS.indexOf(v) < 0) return 'the match kind "' + v.slice(0, 20) + '" is not known (' + MATCH_KINDS.join(', ') + ').';
+    if (k === 'location' && !/^[A-Za-z0-9_-]{1,12}$/.test(v)) return 'the match location must be a location code (letters, digits, - or _, up to 12).';
+    return null;
+  }
+  function matchKey(m) { var k = Object.keys(m)[0]; return k + ':' + (k === 'location' ? m[k].toUpperCase() : m[k]); }
+  // The group a product belongs to in a preset, or null (no match, no guess).
+  // locations: the layout's locations, to read a location's kind.
+  function groupFor(p, product, locations) {
+    if (!p || !Array.isArray(p.groups) || !product) return null;
+    var code = product.location == null ? null : String(product.location), kind = null;
+    (locations || []).forEach(function (l) { if (kind == null && code != null && l && l.code === code) kind = l.kind; });
+    var test = {
+      flag: function (v) { return v === 'niosh' && product.niosh === true; },
+      location: function (v) { return code != null && v.toUpperCase() === code.toUpperCase(); },
+      kind: function (v) { return kind != null && v === kind; }
+    };
+    for (var o = 0; o < MATCH_ORDER.length; o++) {
+      for (var i = 0; i < p.groups.length; i++) {
+        var g = p.groups[i], m = g && g.match;
+        if (m && !matchProblem(m) && Object.keys(m)[0] === MATCH_ORDER[o] && test[MATCH_ORDER[o]](m[MATCH_ORDER[o]])) return g;
+      }
+    }
+    return null;
   }
 
   function slug(s) { return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'preset'; }
@@ -284,7 +333,11 @@
       id: clean(p.id) || 'user-' + slug(p.name),
       name: clean(p.name),
       colours: p.colours.filter(function (c) { return used[c.id]; }).map(function (c) { return { id: c.id, name: clean(c.name), hex: c.hex }; }),
-      groups: p.groups.map(function (g) { return { label: clean(g.label), baskets: g.baskets.slice() }; })
+      groups: p.groups.map(function (g) {
+        var t = { label: clean(g.label), baskets: g.baskets.slice() };
+        if (g.match != null) { var k = Object.keys(g.match)[0]; t.match = {}; t.match[k] = g.match[k]; }
+        return t;
+      })
     };
   }
 
@@ -313,7 +366,7 @@
     Object.keys(p).forEach(function (k) { if (['name', 'colours', 'groups', 'id'].indexOf(k) < 0) out.warnings.push('ignored "' + k + '"'); });
     var errs = check(p);
     if (errs.length) { out.errors = errs.slice(0, 10).concat(errs.length > 10 ? ['…and ' + (errs.length - 10) + ' more problems.'] : []); return out; }
-    p.groups.forEach(function (g, i) { Object.keys(g).forEach(function (k) { if (k !== 'label' && k !== 'baskets') out.warnings.push('ignored "' + k + '" in group ' + (i + 1)); }); });
+    p.groups.forEach(function (g, i) { Object.keys(g).forEach(function (k) { if (k !== 'label' && k !== 'baskets' && k !== 'match') out.warnings.push('ignored "' + k + '" in group ' + (i + 1)); }); });
     var t = tidy({ id: '', name: p.name, colours: p.colours, groups: p.groups });
     // What is stored must pass the same checks when it is read back.
     var again = check(t);
@@ -323,7 +376,7 @@
     return out;
   }
 
-  return { check: check, tidy: tidy, clean: clean, sameKey: sameKey, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
+  return { check: check, tidy: tidy, groupFor: groupFor, matchProblem: matchProblem, MATCH_ORDER: MATCH_ORDER, clean: clean, sameKey: sameKey, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
     MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });

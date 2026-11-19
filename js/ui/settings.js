@@ -85,13 +85,16 @@
     if (darkMq.addEventListener) darkMq.addEventListener('change', onSystem); else if (darkMq.addListener) darkMq.addListener(onSystem);
   }
 
-  // The basket preset in use: built-in (data file) or the user's own.
+  // The basket preset in use: built-in (data file) or the user's own, or null
+  // (2026-11-18: presets are optional and none is the default; a chosen one that
+  // cannot be found is not swapped for another).
   function scheme(ds) {
+    if (!prefs.scheme) return null;
     var list = Alpha.presetsUI ? Alpha.presetsUI.all(ds) : ((ds && ds.basketSchemes) || []);
     for (var i = 0; i < list.length; i++) if (list[i].id === prefs.scheme) return list[i];
-    return list[0] || null;
+    return null;
   }
-  function useScheme(id) { prefs.scheme = id; notice = null; save(); changed(); }
+  function useScheme(id) { prefs.scheme = id || null; notice = null; save(); changed(); }
   // Rebuild the open dialog after a change in another window, keeping focus.
   function rebuildKeepingFocus() {
     var a = document.activeElement, sel = null;
@@ -109,7 +112,7 @@
   // When the chosen preset cannot be found, say so instead of quietly showing another.
   function schemeProblem(ds) {
     var s = scheme(ds);
-    if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (showing "' + (s ? s.name : 'no preset') + '"). ' +
+    if (unreadable) return 'The settings saved on this computer could not be read, so the defaults are in use (' + (s ? 'showing "' + s.name + '"' : 'no basket preset') + '). ' +
       (backupKey ? 'A copy was kept as alpha.' + backupKey + '.' : 'No copy could be kept (the storage is full, or 20 earlier copies are already kept), so they are left as they are and changes are not saved.') + ' Check Settings.';
     if (notice) return notice;
     var w = s && Alpha.presetsUI && Alpha.presetsUI.warning ? Alpha.presetsUI.warning(s.id) : null;
@@ -117,8 +120,8 @@
     var a = s && Alpha.presetsUI && Alpha.presetsUI.alike ? Alpha.presetsUI.alike(s.id) : null;
     if (a != null) return 'The basket preset in use, "' + s.name + '", has a name that looks the same on screen as the preset "' + a + '". Rename one of them in Settings > Edit basket presets.';
     if (usable && !saved) return 'A change to the settings could not be saved (this browser\'s storage may be full). It lasts until the page is closed.';
-    if (!prefs.scheme || !s || s.id === prefs.scheme) return null;
-    return 'The basket preset chosen on this computer could not be found or read; showing "' + s.name + '" instead. Check Settings > Basket preset.';
+    if (!prefs.scheme || s) return null;
+    return 'The basket preset chosen on this computer could not be found or read, so no preset is in use. Check Settings > Basket preset.';
   }
   function disabledRules() { return prefs.disabled; }
   function customRules() { return prefs.custom; }
@@ -154,7 +157,9 @@
 
     var builtIns = {};
     (ds.basketSchemes || []).forEach(function (s) { builtIns[s.id] = 1; });
-    h += '<fieldset><legend>Basket preset</legend>' + Alpha.presetsUI.all(ds).map(function (s) {
+    h += '<fieldset><legend>Basket preset</legend>' +
+      '<label class="opt"><input type="radio" name="scheme" value=""' + (cur ? '' : ' checked') + '> None <span class="muted">(no baskets shown)</span></label>' +
+      Alpha.presetsUI.all(ds).map(function (s) {
       return '<label class="opt"><input type="radio" name="scheme" value="' + esc(s.id) + '"' + (cur && cur.id === s.id ? ' checked' : '') + '> ' +
         esc(s.name) + ' <span class="muted">(' + s.groups.length + ' groups' + (builtIns[s.id] ? '' : ', yours') + ')</span>' +
         (Alpha.presetsUI && Alpha.presetsUI.alike && Alpha.presetsUI.alike(s.id) != null ? ' <strong class="note-bad small">looks the same as "' + esc(Alpha.presetsUI.alike(s.id)) + '"</strong>' : '') +
@@ -233,7 +238,7 @@
 
   function onDialogEvent(e) {
     var t = e.target, wasSaved = saved;
-    if (t.name === 'scheme') { prefs.scheme = t.value; save(); changed(); }
+    if (t.name === 'scheme') { prefs.scheme = t.value || null; save(); changed(); }
     else if (t.name === 'scale') { prefs.scale = t.value; save(); changed(); }
     else if (t.name === 'theme') { prefs.theme = t.value; save(); applyTheme(); } // colours only: nothing to draw again
     else if (t.hasAttribute && t.hasAttribute('data-rule')) {
@@ -294,7 +299,7 @@
         var was = prefs.scheme; load();
         // The preset in use was deleted in the other window: say so here too.
         if (was && was !== prefs.scheme && !(Alpha.presetsUI && Alpha.presetsUI.find(Alpha.state.ds, was))) {
-          var now = scheme(Alpha.state.ds); notice = 'The basket preset in use was deleted in another window; now using "' + (now ? now.name : '') + '".';
+          var now = scheme(Alpha.state.ds); notice = 'The basket preset in use was deleted in another window; ' + (now ? 'now using "' + now.name + '".' : 'no preset is in use now.');
         }
         changed(); if (dlg.open) rebuildKeepingFocus();
       }

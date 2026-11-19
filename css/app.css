@@ -161,6 +161,10 @@ kbd { font-family: var(--mono); font-size: .85em; border: 1px solid var(--line);
 /* A group's baskets drawn as they are stacked: first (top) basket above the second (bottom). */
 .stack { display: inline-flex; flex-direction: column; gap: 2px; flex: none; vertical-align: middle; }
 .stack .swatch { width: 1.3rem; height: .5rem; border-radius: 2px; }
+/* The chosen preset's group for one product (result rows, info pane header). */
+.basket-tag { display: inline-flex; align-items: center; gap: .25rem; margin-left: .4rem; font-size: .8rem; font-weight: 600; vertical-align: middle; white-space: nowrap; }
+.i-head .basket-tag { font-size: .85rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Map and shelf view */
 .map, .elev { flex: 1; min-height: 0; position: relative; }
