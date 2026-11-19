@@ -4,9 +4,11 @@ The web app at the repo root, wrapped as an Android app with Tauri 2. One codeba
 
 ## What is bundled
 
-Before each build, `scripts/stage-web.mjs` copies `index.html`, `css/`, `js/`, `vendor/` and `data/` into `src-tauri/web/` (git-ignored), and Tauri packages that folder. Nothing else in the repo goes into the app.
+Before each build, `scripts/stage-web.mjs` copies the web app (`index.html`, `css/`, `js/`, `vendor/`, `data/`) into `src-tauri/web/` (git-ignored), and Tauri packages that folder. So the Android app is always built from the web app in the same commit, with no Android-specific step for web changes.
 
-`index.html` also tries `../data/real/store.js`, real store data that sits beside a local checkout. The staging script removes that one tag from the packaged copy, so real store data can never be loaded by the app. (Tauri answers a missing file with `index.html`, so the web page's own "drop the tag if missing" would not fire.)
+Every top-level entry of the repo must be listed in the script as web or not web. A new folder stops the build until someone classifies it, so nothing can silently go missing from the app, and nothing private can silently reach it.
+
+The page may load local store data from outside the repo (`src="../..."`, e.g. `../data/local/store.js`). The script drops those tags from the packaged copy, so local store data never reaches the app. (Tauri answers a missing file with `index.html`, so the page's own "drop the tag if missing" would not fire.)
 
 ## Toolchain
 
@@ -53,7 +55,9 @@ adb shell am start -n org.example.alpha.debug/org.example.alpha.MainActivity
 
 ## Tested
 
-Emulator, Android 16 (API 36), x86_64:
+Last parity check: 2026-11-18, built from main at the basket-presets commit. Emulator, Android 16 (API 36), x86_64: store basket presets with stacked colours, dark mode following the system, search, shelf and the map v2 all as on the web, no console errors.
+
+First check, 2026-11-13, emulator, Android 16 (API 36), x86_64:
 - installs and launches;
 - loads the simulated-stock store with no console errors;
 - search for `atorva 40` lists 6 matches;
