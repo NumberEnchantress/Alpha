@@ -11,7 +11,11 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 2;
+  // 2026-11-19: a group has 1 to MAX_BASKETS baskets, top first; NONE in the list
+  // means no basket at that level. The indicator shows only the first MAX_SHOWN.
+  // A preset needs MIN_GROUPS groups, or 1 when every group has a match (a
+  // basket config made in the creator: each group is a rule).
+  var MIN_GROUPS = 3, MAX_GROUPS = 40, MAX_BASKETS = 6, MAX_SHOWN = 3, NONE = 'none', MAX_ANY = 12;
   var MAX_NAME = 60, MAX_LABEL = 40, MAX_COLOUR_NAME = 24, MAX_FILE_BYTES = 256 * 1024;
   var MIN_COLOUR_DISTANCE = 70; // RGB distance below which two colours look alike
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
@@ -21,11 +25,25 @@
   //     location of one of those kinds; the rest fall through to codes and kinds
   //   { location: '070' }    products at that location code
   //   { kind: 'robot' }      products at a location of that kind
+  // or (2026-11-19) a list of those, any of which puts a product in the group
+  //   [{ kind: 'fm' }, { location: '070' }]
+  // ("all of" could be added later as another form).
   // The first group that matches wins, in this order: flags, then location
   // codes, then kinds (so BC [70], location 070 of kind alpha, wins over Alpha).
   // A group without one is a label only; a product that matches no group has none.
   var MATCH_ORDER = ['flag', 'location', 'kind'];
   var MATCH_FLAGS = ['niosh'], MATCH_KINDS = ['alpha', 'fm', 'ref', 'otc', 'robot', 'other'];
+  // The drug types the basket config creator offers, each one match.
+  var TYPES = [
+    { id: 'alpha', label: 'Alpha', match: { kind: 'alpha' } },
+    { id: 'bc70', label: 'BC [70]', match: { location: '070' } },
+    { id: 'fm', label: 'FM', match: { kind: 'fm' } },
+    { id: 'otc', label: 'OTC', match: { kind: 'otc' } },
+    { id: 'niosh', label: 'NIOSH', match: { flag: 'niosh', kinds: ['alpha', 'fm'] } },
+    { id: 'robot', label: 'ROBOT [P]', match: { kind: 'robot' } },
+    { id: 'ref', label: 'REF', match: { kind: 'ref' } },
+    { id: 'other', label: 'Other', match: { kind: 'other' } }
+  ];
 
   // Colours offered in the editor, besides any a preset already uses.
   var COLOUR_CHOICES = [
@@ -228,6 +246,7 @@
     var colours = map(), names = map(), seenHex = [];
     if (!Array.isArray(p.colours)) errors.push('The preset has no colour list.');
     (Array.isArray(p.colours) ? p.colours : []).forEach(function (c) {
+      if (c && c.id === NONE) { errors.push('A colour cannot have the id "' + NONE + '" (it means no basket).'); return; }
       if (!c || !isStr(c.id) || !/^[A-Za-z0-9_-]{1,24}$/.test(c.id) || !isStr(c.name) || blank(c.name) ||
           !isStr(c.hex) || !/^#[0-9a-f]{6}$/i.test(c.hex)) {
         errors.push('A colour needs an id (letters, digits, - or _, up to 24), a name and a hex code like #1a1a1a.');
@@ -254,7 +273,8 @@
 
     if (!Array.isArray(p.groups)) { errors.push('The preset has no group list.'); return errors; }
     var groups = p.groups;
-    if (groups.length < MIN_GROUPS) errors.push('A preset needs at least ' + MIN_GROUPS + ' groups (it has ' + groups.length + ').');
+    var minG = groups.length && groups.every(function (g) { return g && g.match != null; }) ? 1 : MIN_GROUPS;
+    if (groups.length < minG) errors.push('A preset needs at least ' + MIN_GROUPS + ' groups (it has ' + groups.length + ').');
     if (groups.length > MAX_GROUPS) { errors.push('A preset can have at most ' + MAX_GROUPS + ' groups (it has ' + groups.length + ').'); return errors; }
     var labels = map(), labelText = map(), combos = map(), matches = map();
     groups.forEach(function (g, i) {
@@ -272,28 +292,44 @@
       else { labels[K(label)] = i + 1; labelText[K(label)] = label; }
       var b = g.baskets;
       if (!Array.isArray(b) || !b.every(isStr)) { errors.push(n + ': baskets must be a list of colour ids.'); return; }
-      if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 or ' + MAX_BASKETS + ' baskets.');
+      if (b.length < 1 || b.length > MAX_BASKETS) errors.push(n + ' needs 1 to ' + MAX_BASKETS + ' baskets.');
+      else if (b.every(function (id) { return id === NONE; })) errors.push(n + ' needs at least one basket that is not "none".');
       var ok = true;
-      b.forEach(function (id) { if (!colours[id]) { ok = false; errors.push(n + ' uses a colour that is not in the preset ("' + id + '").'); } });
+      b.forEach(function (id) { if (id !== NONE && !colours[id]) { ok = false; errors.push(n + ' uses a colour that is not in the preset ("' + id + '").'); } });
       var mp = matchProblem(g.match);
       if (mp) errors.push(n + ': ' + mp);
       else if (g.match != null) {
-        var mk = matchKey(g.match);
-        if (matches[mk]) errors.push(n + ' matches the same products as group ' + matches[mk] + '.');
-        else matches[mk] = i + 1;
+        var dup = 0;
+        anyOf(g.match).forEach(function (m) { var mk = matchKey(m); if (matches[mk] && !dup) dup = matches[mk]; else if (!matches[mk]) matches[mk] = i + 1; });
+        if (dup) errors.push(n + ' matches the same products as group ' + dup + '.');
       }
       if (!ok || !b.length) return;
       // What staff see is the colours, so compare by colour, in order.
-      var key = b.map(function (id) { return colours[id].hex.toLowerCase(); }).join('+');
-      if (combos[key]) errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return clean(colours[id].name); }).join(' + ') + ').');
+      var key = b.map(function (id) { return id === NONE ? NONE : colours[id].hex.toLowerCase(); }).join('+');
+      if (combos[key]) errors.push(n + ' has the same baskets as group ' + combos[key] + ' (' + b.map(function (id) { return id === NONE ? NONE : clean(colours[id].name); }).join(' + ') + ').');
       else combos[key] = i + 1;
     });
     return errors;
   }
 
+  // A match as a list of single matches (any of them puts a product in).
+  function anyOf(m) { return Array.isArray(m) ? m : [m]; }
   // What is wrong with a group's match, or null (none is fine).
   function matchProblem(m) {
     if (m == null) return null;
+    if (Array.isArray(m)) {
+      if (!m.length || m.length > MAX_ANY) return 'a match list must have 1 to ' + MAX_ANY + ' matches.';
+      var seen = map();
+      for (var a = 0; a < m.length; a++) {
+        if (m[a] == null || Array.isArray(m[a])) return 'each match in a list must be one of { "flag": "niosh" } (optionally with "kinds": [...]), { "location": "<code>" } or { "kind": "<kind>" }.';
+        var pa = oneProblem(m[a]); if (pa) return pa;
+        var ka = matchKey(m[a]); if (seen[ka]) return 'the match list has the same match twice.'; seen[ka] = 1;
+      }
+      return null;
+    }
+    return oneProblem(m);
+  }
+  function oneProblem(m) {
     var keys = m && typeof m === 'object' && !Array.isArray(m) ? Object.keys(m) : [];
     var k = keys.filter(function (x) { return x !== 'kinds'; })[0], v = k == null ? null : m[k];
     if (keys.length !== (k != null && 'kinds' in m ? 2 : 1) || MATCH_ORDER.indexOf(k) < 0 || !isStr(v))
@@ -328,11 +364,19 @@
     for (var o = 0; o < MATCH_ORDER.length; o++) {
       for (var i = 0; i < p.groups.length; i++) {
         var g = p.groups[i], m = g && g.match;
-        if (m && !matchProblem(m) && primaryKey(m) === MATCH_ORDER[o] && test[MATCH_ORDER[o]](m[MATCH_ORDER[o]], m)) return g;
+        if (m == null || matchProblem(m)) continue;
+        var ms = anyOf(m);
+        for (var j = 0; j < ms.length; j++) if (primaryKey(ms[j]) === MATCH_ORDER[o] && test[MATCH_ORDER[o]](ms[j][MATCH_ORDER[o]], ms[j])) return g;
       }
     }
     return null;
   }
+
+  function copyMatch(m) { var k = primaryKey(m), t = {}; t[k] = m[k]; if (m.kinds) t.kinds = m.kinds.slice(); return t; }
+  // The baskets the indicator draws: the first MAX_SHOWN, top first.
+  function shown(g) { return g && Array.isArray(g.baskets) ? g.baskets.slice(0, MAX_SHOWN) : []; }
+  // The creator's type id for a single match, or null when it is not one of TYPES.
+  function typeOf(m) { if (!m || Array.isArray(m) || oneProblem(m)) return null; var k = matchKey(m); var t = TYPES.filter(function (x) { return matchKey(x.match) === k; })[0]; return t ? t.id : null; }
 
   function slug(s) { return clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'preset'; }
 
@@ -347,7 +391,7 @@
       colours: p.colours.filter(function (c) { return used[c.id]; }).map(function (c) { return { id: c.id, name: clean(c.name), hex: c.hex }; }),
       groups: p.groups.map(function (g) {
         var t = { label: clean(g.label), baskets: g.baskets.slice() };
-        if (g.match != null) { var k = primaryKey(g.match); t.match = {}; t.match[k] = g.match[k]; if (g.match.kinds) t.match.kinds = g.match.kinds.slice(); }
+        if (g.match != null) t.match = Array.isArray(g.match) ? g.match.map(copyMatch) : copyMatch(g.match);
         return t;
       })
     };
@@ -388,7 +432,7 @@
     return out;
   }
 
-  return { check: check, tidy: tidy, groupFor: groupFor, matchProblem: matchProblem, MATCH_ORDER: MATCH_ORDER, clean: clean, sameKey: sameKey, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
+  return { check: check, tidy: tidy, groupFor: groupFor, matchProblem: matchProblem, shown: shown, typeOf: typeOf, TYPES: TYPES, NONE: NONE, MAX_SHOWN: MAX_SHOWN, MATCH_ORDER: MATCH_ORDER, clean: clean, sameKey: sameKey, looksAlike: looksAlike, toFile: toFile, fromFile: fromFile, slug: slug,
     COLOUR_CHOICES: COLOUR_CHOICES, MIN_GROUPS: MIN_GROUPS, MAX_GROUPS: MAX_GROUPS, MAX_BASKETS: MAX_BASKETS,
     MAX_NAME: MAX_NAME, MAX_LABEL: MAX_LABEL, MAX_COLOUR_NAME: MAX_COLOUR_NAME, MAX_FILE_BYTES: MAX_FILE_BYTES, FILE_TYPE: FILE_TYPE };
 });

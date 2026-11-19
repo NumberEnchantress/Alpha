@@ -105,7 +105,7 @@
       (s.groups || []).forEach(function (g) {
         if (labels[g.label]) errors.push(where + ': duplicate group label ' + g.label);
         labels[g.label] = 1;
-        (g.baskets || []).forEach(function (b) { if (!colours[b]) errors.push(where + ': group ' + g.label + ' uses unknown colour "' + b + '"'); });
+        (g.baskets || []).forEach(function (b) { if (b !== A.presets.NONE && !colours[b]) errors.push(where + ': group ' + g.label + ' uses unknown colour "' + b + '"'); });
       });
     });
     return { errors: errors, warnings: warnings };

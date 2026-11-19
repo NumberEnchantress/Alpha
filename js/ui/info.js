@@ -32,9 +32,12 @@
     scheme.colours.forEach(function (c) { colours[c.id] = c; });
     return colours;
   }
-  // A group's baskets, first (top) basket above the second, as the baskets are stacked.
+  // A group's baskets, first (top) basket above the next, as the baskets are stacked;
+  // at most the first three (2026-11-19). "none" is an empty level, drawn as an outline.
   function stackHtml(colours, g) {
-    return '<span class="stack" aria-hidden="true">' + g.baskets.map(function (b) {
+    var bs = Alpha.presets.shown(g);
+    return '<span class="stack n' + bs.length + '" aria-hidden="true">' + bs.map(function (b) {
+      if (b === Alpha.presets.NONE) return '<span class="swatch none"></span>';
       var c = colours[b] || { name: b, hex: '#ffffff' };
       var hex = /^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff'; // only plain colours reach style=
       return '<span class="swatch" style="background:' + hex + '"></span>';
@@ -47,7 +50,7 @@
     if (!g) return '';
     var colours = colourMap(scheme);
     var names = g.baskets.map(function (b) { return (colours[b] || { name: b }).name; });
-    var title = 'Baskets: ' + names[0] + (names.length > 1 ? ' (top) + ' + names[1] + ' (bottom)' : '');
+    var title = 'Baskets: ' + (names.length > 1 ? names.join(' + ') + ' (top to bottom)' : names[0]);
     return '<span class="basket-tag" data-testid="basket" title="' + esc(title) + '">' + stackHtml(colours, g) +
       '<span class="b-label">' + esc(g.label) + '</span><span class="visually-hidden"> (' + esc(names.join(' + ')) + ')</span></span>';
   }

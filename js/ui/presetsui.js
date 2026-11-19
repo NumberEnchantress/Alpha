@@ -250,7 +250,7 @@
 
   // Unsaved changes in the editor?
   function dirty() { return !!editing && JSON.stringify(strip(editing.draft)) !== editing.start; }
-  function strip(d) { return { name: d.name, colours: d.colours, groups: d.groups.map(function (g) { return { label: g.label, baskets: g.baskets }; }) }; }
+  function strip(d) { return { name: d.name, colours: d.colours, groups: d.groups.map(function (g) { return { label: g.label, baskets: g.baskets, match: g.match }; }) }; }
   function okToDiscard() { return !dirty() || window.confirm('Discard the changes to this preset?'); }
 
   function builtIn(ds) { return (ds && ds.basketSchemes) || []; }
@@ -309,10 +309,18 @@
   function swatches(p, g) {
     var byId = Object.create(null);
     p.colours.forEach(function (c) { byId[c.id] = c; });
-    return '<span class="stack" aria-hidden="true">' + g.baskets.map(function (b) {
+    return stackOnly(p, g) + ' ' + g.baskets.map(function (b) { return esc(b === P.NONE ? 'none' : (byId[b] || { name: b }).name); }).join(' + ');
+  }
+  // The first baskets (at most P.MAX_SHOWN), top first, as small stacked swatches.
+  function stackOnly(p, g) {
+    var byId = Object.create(null);
+    p.colours.forEach(function (c) { byId[c.id] = c; });
+    var bs = P.shown(g);
+    return '<span class="stack n' + bs.length + '" aria-hidden="true">' + bs.map(function (b) {
+      if (b === P.NONE) return '<span class="swatch none"></span>';
       var c = byId[b] || { name: b, hex: '#ffffff' };
       return '<span class="swatch" style="background:' + (/^#[0-9a-f]{6}$/i.test(c.hex) ? c.hex : '#ffffff') + '"></span>';
-    }).join('') + '</span> ' + g.baskets.map(function (b) { return esc((byId[b] || { name: b }).name); }).join(' + ');
+    }).join('') + '</span>';
   }
 
   function listHtml(ds) {
@@ -376,6 +384,155 @@
       '<button type="button" class="btn" data-act="dl-draft">Download draft</button></div></fieldset>';
   }
 
+
+  /* ---------- basket config creator (2026-11-19) ----------
+     A config is a name and a list of rules. Each rule is a stack of baskets
+     (top first; black, yellow, blue or none) and the drug types it is for: a
+     product of any of those types gets the rule's baskets. It is saved as an
+     ordinary preset: one group per rule, labelled with its types, whose match
+     is the list of the types' matches (presets.js). */
+  var CFG_COLOURS = ['black', 'yellow', 'blue'];
+  function typeById(id) { return P.TYPES.filter(function (t) { return t.id === id; })[0] || null; }
+  function cfgColours() { return P.COLOUR_CHOICES.filter(function (c) { return CFG_COLOURS.indexOf(c.id) >= 0; }).map(function (c) { return { id: c.id, name: c.name, hex: c.hex }; }); }
+  // The rules of a preset the creator can show, or null (then it opens in the preset editor).
+  function configRules(p) {
+    if (!p || !Array.isArray(p.groups) || !p.groups.length) return null;
+    var name = Object.create(null);
+    (p.colours || []).forEach(function (c) { var s = P.COLOUR_CHOICES.filter(function (x) { return x.name.toLowerCase() === P.clean(c.name).toLowerCase(); })[0]; name[c.id] = s && CFG_COLOURS.indexOf(s.id) >= 0 ? s.id : null; });
+    var rules = [];
+    for (var i = 0; i < p.groups.length; i++) {
+      var g = p.groups[i];
+      if (!g || g.match == null || P.matchProblem(g.match)) return null;
+      var types = (Array.isArray(g.match) ? g.match : [g.match]).map(P.typeOf);
+      if (types.some(function (t) { return !t; })) return null;
+      var bs = (g.baskets || []).map(function (b) { return b === P.NONE ? P.NONE : name[b]; });
+      if (!bs.length || bs.some(function (b) { return !b; })) return null;
+      rules.push({ baskets: bs, types: types });
+    }
+    return rules;
+  }
+  function ruleLabel(r, i) {
+    var t = r.types.map(function (id) { var x = typeById(id); return x ? x.label : id; }).join(' + ');
+    return t.length <= P.MAX_LABEL ? t : 'Rule ' + (i + 1) + ', ' + r.types.length + ' types';
+  }
+  // The preset the rules make (what is checked and saved).
+  function syncConfig() {
+    var d = editing.draft;
+    d.colours = cfgColours();
+    d.groups = editing.config.rules.map(function (r, i) {
+      return { label: ruleLabel(r, i), baskets: r.baskets.slice(), match: r.types.map(function (id) { return JSON.parse(JSON.stringify(typeById(id).match)); }) };
+    });
+  }
+  function startConfig(p, origId) {
+    var rules = p ? configRules(p) : [{ baskets: ['black'], types: [P.TYPES[0].id] }];
+    editing = { origId: origId, config: { rules: rules }, draft: { name: p ? p.name : '', colours: [], groups: [] } };
+    syncConfig();
+    editing.start = JSON.stringify(strip(editing.draft));
+    editing.base = origId ? store.raw(KEY + origId) : null;
+    status = '';
+    render('#pe-name');
+  }
+  function usedTypes() { var u = Object.create(null); editing.config.rules.forEach(function (r) { r.types.forEach(function (t) { u[t] = 1; }); }); return u; }
+  function firstFreeType(extra) {
+    var u = usedTypes(); (extra || []).forEach(function (t) { u[t] = 1; });
+    var t = P.TYPES.filter(function (x) { return !u[x.id]; })[0];
+    return (t || P.TYPES[0]).id;
+  }
+  function cfgStackHtml(r) {
+    return stackOnly({ colours: cfgColours() }, { baskets: r.baskets });
+  }
+  function cfgSummary(r) {
+    var names = r.baskets.map(function (b) { return b === P.NONE ? 'none' : (P.COLOUR_CHOICES.filter(function (c) { return c.id === b; })[0] || { name: b }).name; });
+    var types = r.types.map(function (id) { var x = typeById(id); return x ? x.label : id; });
+    return cfgStackHtml(r) + ' <span>' + esc(names.join(' / ')) + (r.baskets.length > P.MAX_SHOWN ? ' (the first ' + P.MAX_SHOWN + ' are shown)' : '') +
+      ' for ' + esc(types.join(' or ')) + '</span>';
+  }
+  function cfgBasketRow(ri, k, b, n) {
+    var id = 'cb-' + ri + '-' + k;
+    var opts = CFG_COLOURS.concat([P.NONE]).map(function (c) {
+      var nm = c === P.NONE ? 'none' : P.COLOUR_CHOICES.filter(function (x) { return x.id === c; })[0].name;
+      return '<option value="' + c + '"' + (b === c ? ' selected' : '') + '>' + esc(nm) + '</option>';
+    }).join('');
+    var hex = hexOf(cfgColours(), b);
+    return '<li class="cfg-item"><label for="' + id + '"><span class="sr">Rule ' + (ri + 1) + ', </span>Basket ' + (k + 1) + (k === 0 ? ' (top)' : '') + '</label> ' +
+      '<select id="' + id + '" data-r="' + ri + '" data-k="' + k + '" data-f="cb">' + opts + '</select> ' +
+      '<span class="swatch' + (b === P.NONE ? ' none' : '') + '" id="sw-' + id + '" aria-hidden="true"' + (b === P.NONE ? '' : ' style="background:' + hex + '"') + '></span> ' +
+      '<button type="button" class="btn small" id="rm-' + id + '" data-act="cfg-rm-basket" data-r="' + ri + '" data-k="' + k + '" aria-label="Rule ' + (ri + 1) + ': remove basket ' + (k + 1) + '"' + (n <= 1 ? ' disabled' : '') + '>−</button></li>';
+  }
+  function cfgTypeRow(ri, k, t, n) {
+    var id = 'ct-' + ri + '-' + k;
+    var opts = P.TYPES.map(function (x) { return '<option value="' + x.id + '"' + (t === x.id ? ' selected' : '') + '>' + esc(x.label) + '</option>'; }).join('');
+    return '<li class="cfg-item"><label for="' + id + '"><span class="sr">Rule ' + (ri + 1) + ', </span>Type ' + (k + 1) + '</label> ' +
+      '<select id="' + id + '" data-r="' + ri + '" data-k="' + k + '" data-f="ct">' + opts + '</select> ' +
+      '<button type="button" class="btn small" id="rm-' + id + '" data-act="cfg-rm-type" data-r="' + ri + '" data-k="' + k + '" aria-label="Rule ' + (ri + 1) + ': remove type ' + (k + 1) + '"' + (n <= 1 ? ' disabled' : '') + '>−</button></li>';
+  }
+  function configHtml() {
+    var c = editing.config, d = editing.draft;
+    return '<fieldset class="preset-editor cfg-editor"><legend>' + (editing.origId ? 'Edit basket config' : 'New basket config') + '</legend>' +
+      '<p class="small">Each rule gives a stack of baskets (top first) to the drug types it lists: a product of any of them gets that stack. The search results and the product show the first ' + P.MAX_SHOWN + '.</p>' +
+      '<label>Name <input type="text" id="pe-name" data-max="' + P.MAX_NAME + '" value="' + esc(d.name) + '" placeholder="e.g. My baskets"></label>' +
+      '<ol class="cfg-rules">' + c.rules.map(function (r, ri) {
+        return '<li><fieldset class="cfg-rule"><legend>Rule ' + (ri + 1) + '</legend><div class="cfg-cols">' +
+          '<div class="cfg-col"><h4 class="cfg-h" id="cbh-' + ri + '">Baskets, top to bottom</h4><ul class="cfg-list" aria-labelledby="cbh-' + ri + '">' +
+          r.baskets.map(function (b, k) { return cfgBasketRow(ri, k, b, r.baskets.length); }).join('') + '</ul>' +
+          '<button type="button" class="btn small" id="add-cb-' + ri + '" data-act="cfg-add-basket" data-r="' + ri + '" aria-label="Rule ' + (ri + 1) + ': add a basket"' + (r.baskets.length >= P.MAX_BASKETS ? ' disabled' : '') + '>+ Basket</button></div>' +
+          '<div class="cfg-col"><h4 class="cfg-h" id="cth-' + ri + '">For drug types (any of)</h4><ul class="cfg-list" aria-labelledby="cth-' + ri + '">' +
+          r.types.map(function (t, k) { return cfgTypeRow(ri, k, t, r.types.length); }).join('') + '</ul>' +
+          '<button type="button" class="btn small" id="add-ct-' + ri + '" data-act="cfg-add-type" data-r="' + ri + '" aria-label="Rule ' + (ri + 1) + ': add a drug type"' + (r.types.length >= P.TYPES.length ? ' disabled' : '') + '>+ Type</button></div>' +
+          '</div><p class="cfg-sum small" id="cfg-sum-' + ri + '">' + cfgSummary(r) + '</p>' +
+          '<button type="button" class="btn small" id="rm-rule-' + ri + '" data-act="cfg-rm-rule" data-r="' + ri + '" aria-label="Remove rule ' + (ri + 1) + '"' + (c.rules.length <= 1 ? ' disabled' : '') + '>Remove rule</button>' +
+          '</fieldset></li>';
+      }).join('') + '</ol>' +
+      '<button type="button" class="btn small" id="cfg-add-rule" data-act="cfg-add-rule"' + (c.rules.length >= P.MAX_GROUPS ? ' disabled' : '') + '>+ Rule</button>' +
+      '<ul id="pe-errors" class="pe-errors" role="status" aria-live="polite"></ul>' +
+      '<div class="pe-buttons"><button type="button" class="btn" data-act="save">Save</button> ' +
+      '<button type="button" class="btn" data-act="save-use">Save and use</button> ' +
+      '<button type="button" class="btn" data-act="cancel">Cancel</button> ' +
+      '<button type="button" class="btn" data-act="dl-draft">Download draft</button></div></fieldset>';
+  }
+  // Clicks on the creator's buttons; true when handled.
+  function configClick(act, b) {
+    if (!editing || !editing.config || act.indexOf('cfg-') !== 0) return false;
+    var rules = editing.config.rules, ri = Number(b.getAttribute('data-r')), k = Number(b.getAttribute('data-k')), r = rules[ri], focus;
+    if (act === 'cfg-add-basket' && r && r.baskets.length < P.MAX_BASKETS) { r.baskets.push('black'); focus = '#cb-' + ri + '-' + (r.baskets.length - 1); }
+    else if (act === 'cfg-rm-basket' && r && r.baskets.length > 1) { r.baskets.splice(k, 1); focus = '#add-cb-' + ri; }
+    else if (act === 'cfg-add-type' && r && r.types.length < P.TYPES.length) { r.types.push(firstFreeType(r.types)); focus = '#ct-' + ri + '-' + (r.types.length - 1); }
+    else if (act === 'cfg-rm-type' && r && r.types.length > 1) { r.types.splice(k, 1); focus = '#add-ct-' + ri; }
+    else if (act === 'cfg-add-rule' && rules.length < P.MAX_GROUPS) {
+      // A basket stack no other rule has yet, where one is short enough to find.
+      var used = Object.create(null); rules.forEach(function (x) { used[x.baskets.join('+')] = 1; });
+      var pick = ['black'];
+      outer: for (var i = 0; i < CFG_COLOURS.length; i++) {
+        if (!used[CFG_COLOURS[i]]) { pick = [CFG_COLOURS[i]]; break; }
+        for (var j = 0; j < CFG_COLOURS.length; j++) if (!used[CFG_COLOURS[i] + '+' + CFG_COLOURS[j]]) { pick = [CFG_COLOURS[i], CFG_COLOURS[j]]; break outer; }
+      }
+      rules.push({ baskets: pick, types: [firstFreeType()] });
+      focus = '#cb-' + (rules.length - 1) + '-0';
+    }
+    else if (act === 'cfg-rm-rule' && rules.length > 1) { rules.splice(ri, 1); focus = '#cfg-add-rule'; }
+    else return true;
+    syncConfig();
+    render(focus);
+    return true;
+  }
+  // A drop-down in the creator changed; true when handled.
+  function configChange(t) {
+    var f = t.getAttribute('data-f');
+    if (!editing || !editing.config || (f !== 'cb' && f !== 'ct')) return false;
+    var ri = Number(t.getAttribute('data-r')), k = Number(t.getAttribute('data-k')), r = editing.config.rules[ri];
+    if (!r) return true;
+    if (f === 'cb' && (CFG_COLOURS.indexOf(t.value) >= 0 || t.value === P.NONE)) {
+      r.baskets[k] = t.value;
+      var sw = dlg.querySelector('#sw-cb-' + ri + '-' + k);
+      if (sw) { sw.style.background = t.value === P.NONE ? '' : hexOf(cfgColours(), t.value); sw.classList.toggle('none', t.value === P.NONE); }
+    } else if (f === 'ct' && typeById(t.value)) r.types[k] = t.value;
+    syncConfig();
+    var sum = dlg.querySelector('#cfg-sum-' + ri);
+    if (sum) sum.innerHTML = cfgSummary(r);
+    showErrors();
+    return true;
+  }
+
   // The page is drawn into #pe-body; #pe-live stays, so screen readers hear status changes.
   function body() {
     var b = dlg.querySelector('#pe-body');
@@ -396,6 +553,7 @@
     var keepFile = body().querySelector('#pe-file');
     body().innerHTML = '<h2 id="presets-title">Basket presets</h2>' +
       '<p class="small">A preset sets the groups a script can belong to and the baskets for each group (at least ' + P.MIN_GROUPS + ' groups). ' +
+      'A basket config gives a stack of baskets to the drug types you pick. ' +
       'Built-in presets come with the data; yours are kept in this browser' + (memoryOnly ? ' <strong class="note-bad">(this browser is not saving them: download them to keep them)</strong>' : '') + '.</p>' +
       (broken.length ? '<div class="note-bad small">' + broken.length + ' saved preset(s) could not be read; they are left unchanged in this browser\'s storage:<ul class="broken-list">' +
         broken.map(function (b) {
@@ -417,9 +575,10 @@
         (notMigrated ? ' (Remove is offered once the waiting presets are copied.)' : ' <button type="button" class="btn small" data-act="old-rm">Remove old data</button>') + '</div>' : '') +
       listHtml(ds) +
       '<div class="pe-top"><button type="button" class="btn" data-act="new">New preset</button> ' +
+      '<button type="button" class="btn" data-act="new-config">New basket config</button> ' +
       '<label class="btn file-btn">Load .json file<input type="file" id="pe-file" accept=".json,application/json"></label></div>' +
       '<p id="pe-status" class="small" tabindex="-1">' + esc(status) + '</p>' +
-      (editing ? editorHtml(ds) : '') +
+      (editing ? (editing.config ? configHtml() : editorHtml(ds)) : '') +
       '<div class="dialog-actions"><button type="button" class="btn" data-act="close">Close</button></div>';
     var newFile = body().querySelector('#pe-file');
     if (keepFile && newFile) newFile.replaceWith(keepFile);
@@ -474,6 +633,8 @@
   // new blank preset does not open with a list of errors.
   function showErrors() {
     var errs = P.check(inUse(editing.draft)), el = dlg.querySelector('#pe-errors');
+    // In the creator a group is a rule.
+    if (editing.config) errs = errs.map(function (e) { return e.replace(/\bGroup (\d+)/g, 'Rule $1').replace(/\bgroup (\d+)/g, 'rule $1'); });
     if (nameTaken(editing.draft.name, editing.origId)) errs.unshift('Another preset already has this name, or one that looks the same on screen.');
     var html = editing.tried || dirty() ? errs.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') : '';
     if (el.innerHTML !== html) el.innerHTML = html; // unchanged text is not announced again
@@ -490,6 +651,9 @@
     status = '';
     render('#pe-name');
   }
+
+  // A preset the creator can show opens there; any other in the preset editor.
+  function editAny(p, origId) { if (configRules(p)) startConfig(p, origId); else startEdit(p, origId); }
 
   function standardColours(d) {
     var std = function (name) { var n = P.clean(name).toLowerCase(); return P.COLOUR_CHOICES.filter(function (c) { return c.name.toLowerCase() === n; })[0]; };
@@ -601,6 +765,7 @@
     var b = e.target.closest('[data-act]');
     if (!b) return;
     var act = b.getAttribute('data-act'), row = b.closest('.preset-row'), ds = Alpha.state.ds;
+    if (configClick(act, b)) return;
     var p = row ? find(ds, row.getAttribute('data-id')) : null;
     if (row && !p) {
       // The row was drawn before another window deleted the preset.
@@ -613,8 +778,8 @@
       status = 'Now using "' + p.name + '".' + (Alpha.settings.savedOk() ? '' : ' This choice could not be saved in this browser (its storage may be full), so it lasts until the page is closed.');
       render('#pe-status');
     }
-    else if (act === 'edit') { if (okToDiscard()) startEdit(p, p.id); }
-    else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = cut(uniqueName('Copy of ' + p.name), P.MAX_NAME); startEdit(c, null); }
+    else if (act === 'edit') { if (okToDiscard()) editAny(p, p.id); }
+    else if (act === 'copy') { if (!okToDiscard()) return; var c = JSON.parse(JSON.stringify(p)); c.name = cut(uniqueName('Copy of ' + p.name), P.MAX_NAME); editAny(c, null); }
     else if (act === 'download') download(p);
     else if (act === 'old-dl') downloadOld();
     else if (act === 'old-restore' || act === 'old-restore-one') {
@@ -677,6 +842,7 @@
       }, 150);
     }
     else if (act === 'new') { if (okToDiscard()) startEdit(blankPreset(), null); }
+    else if (act === 'new-config') { if (okToDiscard()) startConfig(null, null); }
     else if (act === 'add-group') {
       var d = editing.draft, used = {};
       d.groups.forEach(function (g) { used[g.baskets.join('+')] = 1; });
@@ -737,6 +903,7 @@
     }
     if (max) t.setAttribute('data-prev', t.value);
     if (t.id === 'pe-name') { editing.draft.name = t.value; showErrors(); return; }
+    if (configChange(t)) return;
     var i = Number(t.getAttribute('data-i')), f = t.getAttribute('data-f');
     if (isNaN(i) || !f) return;
     var g = editing.draft.groups[i];
@@ -822,7 +989,7 @@
       var nowRaw = jid ? store.raw(KEY + jid) : null;
       if (js && Date.now() - js.at < 1500 && nowRaw != null && nowRaw !== js.raw && !editing) {
         delete justSaved[jid];
-        startEdit(js.preset, jid);
+        editAny(js.preset, jid);
         editing.base = js.raw; // so Save asks before replacing the other window's version
         status = 'Another window saved its own changes to "' + js.preset.name + '" at the same moment, over yours. Your version is back in the editor: save it to keep it (you will be asked before replacing the other version), or Cancel to keep the other.';
         render('#pe-status'); announce(status, true);
