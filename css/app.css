@@ -278,6 +278,10 @@ button.chip:hover { border-color: var(--sel-line); }
   .elev { display: flex; }
   /* Tall enough for shelf numbers of at least 11 px, short enough to see the caption below it. */
   .elev > .elev-draw { flex: none; height: 62vh; min-height: 20rem; max-height: 36rem; }
+  /* Compact option rows (2026-11-19), so more of them show above the on-screen keyboard. */
+  .result { padding: .12rem .3rem; line-height: 1.2; }
+  .r-name { font-size: 1rem; }
+  .r-meta { font-size: .82rem; }
 }
 
 /* Map drawing. Strokes are screen pixels (non-scaling), so they look the same on any floor size. */

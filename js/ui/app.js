@@ -65,6 +65,12 @@
   };
   var MAX_STAGE = 60; // a later stage lists at most this many (type to narrow)
   S.stage = 'name'; S.chips = []; S.pool = null; S.all = []; S.list = 'products'; S.done = false;
+  // Touch screens (2026-11-19, phone fixes): the hints say "tap", and after a
+  // product opens the search box lets go of the focus, so the on-screen keyboard
+  // closes and the info pane and map show. Keyboard and mouse: as before.
+  var coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  function touch() { return !!(coarse && coarse.matches); }
+  function opened() { if (touch()) $('q').blur(); }
 
   function runSearch() {
     var q = $('q').value;
@@ -144,7 +150,7 @@
     $('q').value = '';
     renderStage();
     stageOptions('');
-    if (S.stage === 'ndc' && S.all.length === 1) { S.done = true; showShelf(); } // one NDC: that product
+    if (S.stage === 'ndc' && S.all.length === 1) { S.done = true; showShelf(); opened(); } // one NDC: that product
   }
   // Back to the last stage chosen by hand (stages with one option are passed over),
   // or to the chip at `at` (a click on it), with what was typed there.
@@ -168,6 +174,8 @@
     var st = STAGE[S.stage], input = $('q');
     $('q-label').textContent = st.label;
     input.placeholder = st.ph;
+    // The number pad for strengths only (the NDC stage also takes maker and location names).
+    if (S.stage === 'dose') input.setAttribute('inputmode', 'decimal'); else input.removeAttribute('inputmode');
     var el = $('chips');
     if (!S.chips.length) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
@@ -224,13 +232,19 @@
     var input = $('q');
     input.setAttribute('aria-expanded', String(S.results.length > 0));
     updateActive(false);
+    S.hint = [r, q];
+    $('status').textContent = S.hintText = hintFor(r, q);
+    if (touch()) fitList();
+  }
 
-    var st = '', R = S.results, bk = ' Shift+Tab or Backspace goes back.';
+  // The line under the search box: what is listed and how to choose (keys, or taps on a touch screen).
+  function hintFor(r, q) {
+    var st = '', R = S.results, tap = touch(), bk = tap ? ' ⌫ in an empty box goes back.' : ' Shift+Tab or Backspace goes back.';
     if (r.mode === 'stage') {
       var info = STAGE[S.stage], of = S.chips.map(chipLabel).filter(Boolean).join(' ');
-      if (!r.total) st = 'No ' + info.noun + ' of ' + of + ' matches “' + q.trim() + '”. Esc starts a new search.' + bk;
+      if (!r.total) st = 'No ' + info.noun + ' of ' + of + ' matches “' + q.trim() + '”.' + (tap ? ' Clear the box to see them all;' : ' Esc starts a new search.') + bk;
       else st = count(r.total, info.noun, info.many) + ' of ' + of + (S.stage === 'ndc' && r.total > 1 ? ', fast movers first' : '') +
-        (r.total > R.length ? ' (showing ' + R.length + '; type to narrow)' : '') + ': ↑ ↓, then ' + (S.stage === 'ndc' ? 'Enter.' : 'Enter or Tab.') + bk;
+        (r.total > R.length ? ' (showing ' + R.length + '; type to narrow)' : '') + (tap ? ': tap to choose;' : ': ↑ ↓, then ' + (S.stage === 'ndc' ? 'Enter.' : 'Enter or Tab.')) + bk;
     } else if (r.mode === 'empty') st = '';
     else if (!r.total) {
       st = r.badCheck ? 'Barcode ' + q.trim() + ' fails its check digit: scan it again or type the NDC.'
@@ -238,17 +252,28 @@
         : r.complete ? 'No product with NDC ' + r.complete + ' in this pharmacy.' : 'No matches for “' + q.trim() + '”.';
     } else if (R[0] && R[0].typo) {
       st = 'No exact match for “' + q.trim() + '”. ' + (r.total === 1 ? 'A drug with a similar spelling is' : r.total + (S.list === 'names' ? ' drugs' : ' products') + ' with similar spellings are') +
-        ' listed, most similar first: it may be a different drug. Check the name, then choose with ↓ or a click.';
+        ' listed, most similar first: it may be a different drug. Check the name, then ' + (tap ? 'tap to choose.' : 'choose with ↓ or a click.');
     } else if (S.ambiguous) {
       var names = []; R.forEach(function (x) { var d = x.drug || x.product.drug; if (names.indexOf(d) < 0) names.push(d); });
-      st = r.total + ' matches for ' + (names.length > 3 ? names.length + ' different drugs' : names.join(', ')) + ': choose one with ↓ or a click.';
+      st = r.total + ' matches for ' + (names.length > 3 ? names.length + ' different drugs' : names.join(', ')) + (tap ? ': tap one to choose it.' : ': choose one with ↓ or a click.');
     } else if (S.list === 'names') {
-      st = count(r.total, 'drug', 'drugs') + (r.total > MAX_SHOWN ? ' (showing ' + MAX_SHOWN + '; type more to narrow)' : '') + ': ↑ ↓, then Enter or Tab to choose the form and strength.';
+      st = count(r.total, 'drug', 'drugs') + (r.total > MAX_SHOWN ? ' (showing ' + MAX_SHOWN + '; type more to narrow)' : '') + (tap ? ': tap one' : ': ↑ ↓, then Enter or Tab') + ' to choose the form and strength.';
     } else {
       st = r.total + (r.total === 1 ? ' match' : ' matches') + (r.total > 3 ? ', fast movers first' : '') +
         (r.total > MAX_SHOWN ? ' (showing ' + MAX_SHOWN + '; type more to narrow)' : '') + '.';
     }
-    $('status').textContent = st;
+    return st;
+  }
+
+  // Phones: while the search box has the focus (the on-screen keyboard is up),
+  // the list ends at the bottom of what is visible and scrolls inside, with the
+  // chosen row in view, so more rows show above the keyboard.
+  var vv = window.visualViewport, narrowMq = window.matchMedia ? window.matchMedia('(max-width: 760px)') : null;
+  function fitList() {
+    var list = $('results');
+    if (!vv || !touch() || !narrowMq || !narrowMq.matches || document.activeElement !== $('q')) { if (list.style.maxHeight) list.style.maxHeight = ''; return; }
+    var h = Math.max(120, Math.floor(vv.offsetTop + vv.height - list.getBoundingClientRect().top - 4));
+    list.style.maxHeight = h + 'px';
   }
 
   // `scroll` is false right after a new search (the list is already at the top),
@@ -277,6 +302,7 @@
     updateActive();
     choose(S.results[i].product);
     S.done = true;
+    opened();
   }
 
   /* ---------- the chosen product ---------- */
@@ -297,6 +323,7 @@
     resetStages();
     input.value = Alpha.ndc.format(n);
     runSearch();
+    if (touch()) { input.blur(); return; } // (no keyboard over the product just opened)
     input.focus();
     input.select();
   }
@@ -349,8 +376,8 @@
       // (not a result found only by a different spelling: that needs ↓ or a click)
       if (S.active < 0 && S.results.length && !S.results[0].typo && !S.ambiguous) { S.active = 0; updateActive(); }
       if (S.list !== 'products') { if (S.active >= 0) pick(S.active); return; }
-      if (S.active >= 0) { take(S.active); showShelf(); }
       e.target.select(); // the next scan or typed search replaces the text
+      if (S.active >= 0) { take(S.active); showShelf(); }
     } else if (e.key === 'Tab' && !e.shiftKey && !mod) {
       // Tab chooses like Enter where a choice leads on; otherwise it moves focus as usual.
       if (S.list !== 'products' && S.active >= 0) { e.preventDefault(); pick(S.active); }
@@ -475,6 +502,35 @@
         requestAnimationFrame(function () { if (label.getBoundingClientRect().top < 0) label.scrollIntoView({ block: 'start' }); });
       };
       if (narrow.addEventListener) narrow.addEventListener('change', toNarrow); else if (narrow.addListener) narrow.addListener(toNarrow);
+    }
+    if (coarse) {
+      // A pointer change (a mouse plugged into a tablet, say) rewords the hint, unless something else replaced it.
+      var reword = function () { if (S.hint && $('status').textContent === S.hintText) $('status').textContent = S.hintText = hintFor(S.hint[0], S.hint[1]); fitList(); };
+      if (coarse.addEventListener) coarse.addEventListener('change', reword); else if (coarse.addListener) coarse.addListener(reword);
+    }
+    if (vv) {
+      var fitting = false, lastH = vv.height;
+      var refit = function () {
+        if (fitting) return;
+        fitting = true;
+        requestAnimationFrame(function () {
+          fitting = false;
+          if (!touch()) return;
+          // The keyboard just came up: the search label to the top, so the list has the room.
+          var label = document.querySelector('.search-label');
+          if (vv.height < lastH - 120 && document.activeElement === q && narrowMq && narrowMq.matches && label) {
+            var dy = label.getBoundingClientRect().top - vv.offsetTop - 4;
+            if (dy > 0) window.scrollBy(0, dy);
+          }
+          lastH = vv.height;
+          fitList();
+          if (S.active >= 0 && document.activeElement === q) updateActive();
+        });
+      };
+      vv.addEventListener('resize', refit);
+      vv.addEventListener('scroll', refit);
+      q.addEventListener('focus', refit);
+      q.addEventListener('blur', function () { fitList(); });
     }
     Alpha.settings.init({ onChange: function () { refresh(); }, reload: function () { loadData(); runSearch(); } });
     runSearch();
