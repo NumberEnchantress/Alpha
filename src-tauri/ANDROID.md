@@ -4,7 +4,7 @@ The web app at the repo root, wrapped as an Android app with Tauri 2. One codeba
 
 ## What is bundled
 
-Before each build, `scripts/stage-web.mjs` copies the web app (`index.html`, `css/`, `js/`, `vendor/`, `data/`) into `src-tauri/web/` (git-ignored), and Tauri packages that folder. So the Android app is always built from the web app in the same commit, with no Android-specific step for web changes.
+Before each build, `scripts/stage-web.mjs` copies the web app (`index.html`, `css/`, `js/`, `vendor/`, `data/`) into `src-tauri/web/` (git-ignored), and Tauri packages that folder. It copies only files git tracks, so an untracked or ignored file in those folders (a private export dropped into `data/`, say) is never packaged. So the Android app is always built from the web app in the same commit, with no Android-specific step for web changes.
 
 Every top-level entry of the repo must be listed in the script as web or not web. A new folder stops the build until someone classifies it, so nothing can silently go missing from the app, and nothing private can silently reach it.
 
