@@ -6,7 +6,8 @@
 <meta name="robots" content="noindex, nofollow">
 <script>/* The theme before the first paint (Settings, Theme; settings.js keeps it up to date). */
 (function () { var t; try { t = JSON.parse(localStorage.getItem('alpha.prefs')).theme; } catch (e) { t = null; }
-  if (t !== 'light' && t !== 'dark') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  if (t === 'system') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  if (t !== 'dark') t = 'light'; // Light is the default (2026-11-19)
   document.documentElement.setAttribute('data-theme', t); })();</script>
 <title>Alpha</title>
 <link rel="stylesheet" href="css/app.css">
@@ -17,6 +18,7 @@
   <span id="dataset-name" class="dataset"></span>
   <span id="sample-banner" class="sample-banner" hidden>SAMPLE DATA: fictional, not for dispensing</span>
   <span class="spacer"></span>
+  <button type="button" id="theme-btn" class="btn icon-btn" aria-label="Dark mode" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g class="i-moon"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></g><g class="i-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg></button>
   <button type="button" id="help-btn" class="btn" aria-haspopup="dialog">Keys <kbd>?</kbd></button>
   <button type="button" id="settings-btn" class="btn" aria-haspopup="dialog">Settings</button>
 </header>

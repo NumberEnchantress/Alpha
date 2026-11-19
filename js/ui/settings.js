@@ -12,7 +12,7 @@
   var SCALES = [['1', 'Normal'], ['1.15', 'Large'], ['1.3', 'Larger']];
   var THEMES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']];
 
-  var prefs = { scheme: null, scale: '1', theme: 'system', disabled: {}, custom: [] };
+  var prefs = { scheme: null, scale: '1', theme: 'light', disabled: {}, custom: [] };
   var extra = {}, saved = true, usable = true, unreadable = false, backupKey = null, notice = null, hooks = {}, dlg = null;
 
   // Saved settings that cannot be read (or hold values of the wrong kind) are
@@ -52,8 +52,8 @@
     if (p) {
       prefs.scheme = p.scheme || null;
       prefs.scale = SCALES.some(function (s) { return s[0] === p.scale; }) ? p.scale : '1';
-      // a theme this version does not know (or none) means System
-      prefs.theme = THEMES.some(function (s) { return s[0] === p.theme; }) ? p.theme : 'system';
+      // a theme this version does not know (or none) means Light (the default since 2026-11-19)
+      prefs.theme = THEMES.some(function (s) { return s[0] === p.theme; }) ? p.theme : 'light';
       prefs.disabled = p.disabled && typeof p.disabled === 'object' ? p.disabled : {};
       prefs.custom = Array.isArray(p.custom) ? p.custom : [];
       // Fields this version does not use (a later version's, or added by hand) are kept as they are.
@@ -79,7 +79,17 @@
   function applyTheme() {
     var t = prefs.theme === 'light' || prefs.theme === 'dark' ? prefs.theme : (darkMq && darkMq.matches ? 'dark' : 'light');
     document.documentElement.setAttribute('data-theme', t);
+    var b = document.getElementById('theme-btn');
+    if (b) { b.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false'); b.title = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'; }
   }
+  // The sun/moon button in the top bar flips light and dark (saved like the
+  // Settings choice, so it leaves System).
+  function toggleTheme() {
+    prefs.theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    save(); applyTheme();
+    if (dlg && dlg.open) rebuildKeepingFocus();
+  }
+  if (document.getElementById('theme-btn')) document.getElementById('theme-btn').addEventListener('click', toggleTheme);
   if (darkMq) {
     var onSystem = function () { if (prefs.theme === 'system') applyTheme(); };
     if (darkMq.addEventListener) darkMq.addEventListener('change', onSystem); else if (darkMq.addListener) darkMq.addListener(onSystem);

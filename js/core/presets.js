@@ -17,6 +17,8 @@
   var FILE_TYPE = 'alpha-basket-preset', FILE_VERSION = 1;
   // Optional per group (2026-11-18): which products belong to it. Exactly one of
   //   { flag: 'niosh' }      products on the NIOSH list (niosh === true)
+  //     optionally with kinds: ['alpha', 'fm'] (2026-11-19): only those at a
+  //     location of one of those kinds; the rest fall through to codes and kinds
   //   { location: '070' }    products at that location code
   //   { kind: 'robot' }      products at a location of that kind
   // The first group that matches wins, in this order: flags, then location
@@ -293,15 +295,25 @@
   function matchProblem(m) {
     if (m == null) return null;
     var keys = m && typeof m === 'object' && !Array.isArray(m) ? Object.keys(m) : [];
-    if (keys.length !== 1 || MATCH_ORDER.indexOf(keys[0]) < 0 || !isStr(m[keys[0]]))
-      return 'match must be one of { "flag": "niosh" }, { "location": "<code>" } or { "kind": "<kind>" }.';
-    var k = keys[0], v = m[k];
+    var k = keys.filter(function (x) { return x !== 'kinds'; })[0], v = k == null ? null : m[k];
+    if (keys.length !== (k != null && 'kinds' in m ? 2 : 1) || MATCH_ORDER.indexOf(k) < 0 || !isStr(v))
+      return 'match must be one of { "flag": "niosh" } (optionally with "kinds": [...]), { "location": "<code>" } or { "kind": "<kind>" }.';
+    if ('kinds' in m) {
+      var ks = m.kinds;
+      if (k !== 'flag') return 'match "kinds" goes only with a flag.';
+      if (!Array.isArray(ks) || !ks.length || ks.length > MATCH_KINDS.length) return 'match "kinds" must be a list of 1 to ' + MATCH_KINDS.length + ' kinds.';
+      for (var j = 0; j < ks.length; j++) {
+        if (!isStr(ks[j]) || MATCH_KINDS.indexOf(ks[j]) < 0) return 'the match kind "' + String(ks[j]).slice(0, 20) + '" is not known (' + MATCH_KINDS.join(', ') + ').';
+        if (ks.indexOf(ks[j]) !== j) return 'match "kinds" lists "' + ks[j] + '" twice.';
+      }
+    }
     if (k === 'flag' && MATCH_FLAGS.indexOf(v) < 0) return 'the match flag "' + v.slice(0, 20) + '" is not known (' + MATCH_FLAGS.join(', ') + ').';
     if (k === 'kind' && MATCH_KINDS.indexOf(v) < 0) return 'the match kind "' + v.slice(0, 20) + '" is not known (' + MATCH_KINDS.join(', ') + ').';
     if (k === 'location' && !/^[A-Za-z0-9_-]{1,12}$/.test(v)) return 'the match location must be a location code (letters, digits, - or _, up to 12).';
     return null;
   }
-  function matchKey(m) { var k = Object.keys(m)[0]; return k + ':' + (k === 'location' ? m[k].toUpperCase() : m[k]); }
+  function primaryKey(m) { return Object.keys(m).filter(function (x) { return x !== 'kinds'; })[0]; }
+  function matchKey(m) { var k = primaryKey(m); return k + ':' + (k === 'location' ? m[k].toUpperCase() : m[k]) + (m.kinds ? ':' + m.kinds.slice().sort().join(',') : ''); }
   // The group a product belongs to in a preset, or null (no match, no guess).
   // locations: the layout's locations, to read a location's kind.
   function groupFor(p, product, locations) {
@@ -309,14 +321,14 @@
     var code = product.location == null ? null : String(product.location), kind = null;
     (locations || []).forEach(function (l) { if (kind == null && code != null && l && l.code === code) kind = l.kind; });
     var test = {
-      flag: function (v) { return v === 'niosh' && product.niosh === true; },
+      flag: function (v, m) { return v === 'niosh' && product.niosh === true && (!m.kinds || (kind != null && m.kinds.indexOf(kind) >= 0)); },
       location: function (v) { return code != null && v.toUpperCase() === code.toUpperCase(); },
       kind: function (v) { return kind != null && v === kind; }
     };
     for (var o = 0; o < MATCH_ORDER.length; o++) {
       for (var i = 0; i < p.groups.length; i++) {
         var g = p.groups[i], m = g && g.match;
-        if (m && !matchProblem(m) && Object.keys(m)[0] === MATCH_ORDER[o] && test[MATCH_ORDER[o]](m[MATCH_ORDER[o]])) return g;
+        if (m && !matchProblem(m) && primaryKey(m) === MATCH_ORDER[o] && test[MATCH_ORDER[o]](m[MATCH_ORDER[o]], m)) return g;
       }
     }
     return null;
@@ -335,7 +347,7 @@
       colours: p.colours.filter(function (c) { return used[c.id]; }).map(function (c) { return { id: c.id, name: clean(c.name), hex: c.hex }; }),
       groups: p.groups.map(function (g) {
         var t = { label: clean(g.label), baskets: g.baskets.slice() };
-        if (g.match != null) { var k = Object.keys(g.match)[0]; t.match = {}; t.match[k] = g.match[k]; }
+        if (g.match != null) { var k = primaryKey(g.match); t.match = {}; t.match[k] = g.match[k]; if (g.match.kinds) t.match.kinds = g.match.kinds.slice(); }
         return t;
       })
     };
